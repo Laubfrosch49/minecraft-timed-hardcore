@@ -1,5 +1,6 @@
 package dev.laubfrosch.timedhardcore;
 
+import com.google.gson.JsonElement;
 import com.google.gson.reflect.TypeToken;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -9,6 +10,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Keeps track of who is dead and until when.
@@ -21,6 +23,8 @@ public final class DeadPlayerManager {
 		public String name;
 		public long diedAt;
 		public long reviveAt;
+		/** Death message as text JSON, shown in the graveyard tab. May be missing. */
+		public @Nullable JsonElement deathMessage;
 		/** The player is alive again but has not joined since. Kept so the server list can tell them. */
 		public boolean revived;
 
@@ -47,11 +51,16 @@ public final class DeadPlayerManager {
 	}
 
 	public void markDead(UUID uuid, String name, long diedAt, long reviveAt) {
+		markDead(uuid, name, diedAt, reviveAt, null);
+	}
+
+	public void markDead(UUID uuid, String name, long diedAt, long reviveAt, @Nullable JsonElement deathMessage) {
 		DeadPlayer deadPlayer = new DeadPlayer();
 		deadPlayer.uuid = uuid;
 		deadPlayer.name = name;
 		deadPlayer.diedAt = diedAt;
 		deadPlayer.reviveAt = reviveAt;
+		deadPlayer.deathMessage = deathMessage;
 		deadPlayers.put(uuid, deadPlayer);
 		save();
 	}

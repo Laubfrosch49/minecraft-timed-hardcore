@@ -35,7 +35,7 @@ public final class TimeFormat {
 		}
 		// Seconds only matter when less than an hour is left
 		if (days == 0 && hours == 0 && (seconds > 0 || parts.isEmpty())) {
-			parts.add(seconds + "s");
+			parts.add(seconds + " sec");
 		}
 		return String.join(" ", parts);
 	}

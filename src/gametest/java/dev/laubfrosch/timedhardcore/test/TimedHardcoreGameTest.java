@@ -7,6 +7,7 @@ import com.mojang.serialization.JsonOps;
 import dev.laubfrosch.timedhardcore.DeadPlayerManager;
 import dev.laubfrosch.timedhardcore.DeathHandler;
 import dev.laubfrosch.timedhardcore.ExtraLifeManager;
+import dev.laubfrosch.timedhardcore.Graveyard;
 import dev.laubfrosch.timedhardcore.GreenApple;
 import dev.laubfrosch.timedhardcore.Healer;
 import dev.laubfrosch.timedhardcore.Messages;
@@ -41,6 +42,7 @@ import net.minecraft.network.Connection;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.PacketFlow;
+import net.minecraft.network.protocol.game.ClientboundUpdateAdvancementsPacket.PositionedAdvancement;
 import net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket;
 import net.minecraft.network.protocol.status.ServerStatus;
 import net.minecraft.server.MinecraftServer;
@@ -151,6 +153,19 @@ public class TimedHardcoreGameTest {
 			helper.assertTrue(respawned.experienceLevel == 10, "Dead player should keep their levels, has " + respawned.experienceLevel);
 			helper.assertFalse(respawned.entityTags().contains(DeathHandler.KEEP_INVENTORY_TAG), "Tag should be gone after the respawn");
 
+			// Graveyard tab: root + 4 rules + the dead player, with the stored death message
+			List<PositionedAdvancement> graveyard = Graveyard.build(server, manager.stillDead());
+			helper.assertTrue(graveyard.size() == 6, "The graveyard should have a root, 4 rules and 1 dead player, has " + graveyard.size());
+			String grave = graveyard.getLast().advancement().value().display().orElseThrow().description().getString();
+			helper.assertTrue(grave.contains("Victim") && grave.contains("Died: ") && grave.contains("Revival: "), "Graveyard entry: " + grave);
+			String rules = graveyard.subList(1, 5).stream()
+				.map(rule -> rule.advancement().value().display().orElseThrow().description().getString())
+				.reduce("", (a, b) -> a + "\n" + b);
+			// Only the facts are checked, so the wording and the line breaks can change freely
+			helper.assertTrue(rules.contains("1 day after death") && rules.contains("2 or more players")
+				&& rules.contains("Wandering Healer") && !rules.contains("emerald") && rules.contains("inventory and XP") && rules.contains("keepInventory is off"),
+				"Rules in the graveyard: " + rules);
+
 			// /timedhardcore list contains a clickable revive button
 			Component entry = Messages.listEntry(manager.getActive(id).orElseThrow(), true);
 			boolean hasButton = entry.toFlatList().stream().anyMatch(part ->
@@ -164,6 +179,7 @@ public class TimedHardcoreGameTest {
 			// Server list: revived, but not joined since
 			String revivedMotd = ServerListMotd.personalize(ServerListMotd.publish(status).description(), List.of(id)).getString();
 			helper.assertTrue(revivedMotd.startsWith("§aMy Server\n") && revivedMotd.contains("revived"), "MOTD after the revival: " + revivedMotd);
+			helper.assertTrue(Graveyard.build(server, manager.stillDead()).size() == 5, "Without dead players the graveyard has a root and 4 rules");
 			manager.welcomeBack(id);
 			helper.assertTrue(ServerListMotd.publish(status) == status, "Nothing is attached to the MOTD once the player has joined again");
 

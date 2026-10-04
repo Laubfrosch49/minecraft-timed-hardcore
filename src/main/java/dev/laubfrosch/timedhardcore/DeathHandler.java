@@ -73,7 +73,8 @@ public final class DeathHandler {
 		long revivalTime = TimedHardcore.config().revivalTime(now);
 		long duration = revivalTime - now;
 
-		manager.markDead(profile.id(), profile.name(), now, revivalTime);
+		manager.markDead(profile.id(), profile.name(), now, revivalTime,
+			Graveyard.encodeDeathMessage(player.level().getServer().registryAccess(), deathMessage));
 		pendingRespawn.add(player.getUUID());
 		pendingDeathMessages.put(player.getUUID(), deathMessage);
 		pendingAnnouncements.put(player.getUUID(), Messages.deathBroadcast(profile, duration));

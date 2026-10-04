@@ -91,6 +91,7 @@ public class TimedHardcore implements ModInitializer {
 		manager = null;
 		lives = null;
 		ClientSync.reset();
+		Graveyard.reset();
 		TabListStatus.reset();
 		RiskNotifier.reset();
 	}
@@ -99,6 +100,7 @@ public class TimedHardcore implements ModInitializer {
 		DeathHandler.onTickEnd(server);
 		if (manager != null && server.getTickCount() % SharedConstants.TICKS_PER_SECOND == 0) {
 			announceRevivals(server);
+			Graveyard.tick(server, manager);
 			refreshStatus(server);
 		}
 	}
