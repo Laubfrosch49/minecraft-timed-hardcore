@@ -1,0 +1,19 @@
+{
+  "model": {
+    "type": "minecraft:select",
+    "property": "minecraft:custom_model_data",
+    "cases": [
+      {
+        "when": "timed-hardcore:green_apple",
+        "model": {
+          "type": "minecraft:model",
+          "model": "timed-hardcore:item/green_apple"
+        }
+      }
+    ],
+    "fallback": {
+      "type": "minecraft:model",
+      "model": "minecraft:item/apple"
+    }
+  }
+}

@@ -3,7 +3,13 @@
 	"package": "dev.laubfrosch.timedhardcore.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
-		"ExampleMixin"
+		"ConsumableMixin",
+		"PlayerListMixin",
+		"PlayerMixin",
+		"ServerGamePacketListenerImplMixin",
+		"ServerPlayerMixin",
+		"ServerStatusPacketListenerImplMixin",
+		"WanderingTraderSpawnerMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

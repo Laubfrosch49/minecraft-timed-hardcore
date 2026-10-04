@@ -3,7 +3,15 @@
 	"package": "dev.laubfrosch.timedhardcore.client.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"client": [
-		"ExampleClientMixin"
+		"ClientPacketListenerDeathScreenMixin",
+		"ClientPacketListenerMixin",
+		"GuiDeathScreenMixin",
+		"HeartTypeMixin",
+		"HudMixin",
+		"LivingEntityRendererMixin",
+		"ServerStatusPingerMixin",
+		"VillagerRenderStateMixin",
+		"WanderingTraderRendererMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

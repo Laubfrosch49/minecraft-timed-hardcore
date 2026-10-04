@@ -1,0 +1,15 @@
+{
+	"schemaVersion": 1,
+	"id": "timed-hardcore-test",
+	"version": "1.0.0",
+	"name": "Timed Hardcore Tests",
+	"environment": "*",
+	"entrypoints": {
+		"fabric-gametest": [
+			"dev.laubfrosch.timedhardcore.test.TimedHardcoreGameTest"
+		]
+	},
+	"depends": {
+		"timed-hardcore": "*"
+	}
+}

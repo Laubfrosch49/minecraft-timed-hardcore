@@ -1,0 +1,4 @@
+{
+	"gamerule.timed-hardcore.keep_inventory_on_timed_death": "Keep inventory on timed death",
+	"gamerule.timed-hardcore.keep_inventory_on_timed_death.description": "Players who stay dead after dying keep inventory and XP, regardless of keepInventory."
+}
