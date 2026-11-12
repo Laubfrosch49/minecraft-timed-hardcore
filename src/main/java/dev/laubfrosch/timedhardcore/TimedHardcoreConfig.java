@@ -5,6 +5,8 @@ import com.google.gson.GsonBuilder;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.DateTimeException;
@@ -16,6 +18,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Settings stored in config/timed-hardcore.json.
@@ -59,6 +62,22 @@ public class TimedHardcoreConfig {
      * For this the server list response carries the UUID and remaining time of every dead player.
      */
     public boolean showRemainingTimeInMotd = true;
+
+    /**
+     * Discord webhook that receives a message for every timed death and revival
+     * (Discord: Server Settings → Integrations → Webhooks → Copy Webhook URL). Empty = off.
+     */
+    public String discordWebhookUrl = "";
+
+    /**
+     * Picture of the player in the Discord messages: black and white on death, in colour on revival.
+     * {player} becomes the UUID on servers in online mode and the name otherwise; {uuid} and {name} also work.
+     * Empty = no picture.
+     */
+    public String discordPlayerImage = "https://nmsr.nickac.dev/fullbody/{player}";
+
+    /** Head of the player next to their name at the top of the Discord messages. Same placeholders, empty = no head. */
+    public String discordPlayerHead = "https://nmsr.nickac.dev/face/{player}";
 
     /** Are enough players online that a death has no consequences? */
     public boolean isSafe(int onlinePlayers) {
@@ -151,6 +170,28 @@ public class TimedHardcoreConfig {
         }
         if (healerSpawnChance < 0 || healerSpawnChance > 1) {
             throw new IllegalArgumentException("healerSpawnChance must be between 0 and 1");
+        }
+        validateUrl("discordWebhookUrl", discordWebhookUrl);
+        validateUrl("discordPlayerImage", withoutPlaceholders(discordPlayerImage));
+        validateUrl("discordPlayerHead", withoutPlaceholders(discordPlayerHead));
+    }
+
+    private static @Nullable String withoutPlaceholders(@Nullable String template) {
+        return template == null ? null : template.replace("{player}", "x").replace("{uuid}", "x").replace("{name}", "x");
+    }
+
+    /** Empty is allowed (= off), anything else must be an http(s) address. */
+    private static void validateUrl(String field, @Nullable String url) {
+        if (url == null || url.isBlank()) {
+            return;
+        }
+        try {
+            URI uri = new URI(url.trim());
+            if (!("https".equals(uri.getScheme()) || "http".equals(uri.getScheme())) || uri.getHost() == null) {
+                throw new URISyntaxException(url, "not an http(s) address");
+            }
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException(field + " is not a valid address (expected https://...)");
         }
     }
 

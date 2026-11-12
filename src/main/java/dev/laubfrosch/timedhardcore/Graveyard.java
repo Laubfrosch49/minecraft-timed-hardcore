@@ -301,7 +301,7 @@ public final class Graveyard {
 		return ComponentSerialization.CODEC.encodeStart(registries.createSerializationContext(JsonOps.INSTANCE), message).result().orElse(null);
 	}
 
-	private static @Nullable Component decodeDeathMessage(HolderLookup.Provider registries, @Nullable JsonElement json) {
+	public static @Nullable Component decodeDeathMessage(HolderLookup.Provider registries, @Nullable JsonElement json) {
 		if (json == null) {
 			return null;
 		}

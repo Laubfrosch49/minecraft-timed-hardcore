@@ -3,6 +3,9 @@ package dev.laubfrosch.timedhardcore;
 import dev.laubfrosch.timedhardcore.network.TimedHardcoreNetwork;
 import java.nio.file.Path;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
@@ -32,6 +35,7 @@ public class TimedHardcore implements ModInitializer {
 	/** null while no server is running, and in singleplayer, where the mod is inactive. */
 	private static @Nullable DeadPlayerManager manager;
 	private static @Nullable ExtraLifeManager lives;
+	private static @Nullable ScheduledExecutorService revivalClock;
 
 	@Override
 	public void onInitialize() {
@@ -79,6 +83,7 @@ public class TimedHardcore implements ModInitializer {
 		Path world = server.getWorldPath(LevelResource.ROOT);
 		manager = new DeadPlayerManager(world.resolve(MOD_ID + ".json"));
 		lives = new ExtraLifeManager(world.resolve(MOD_ID + "-lives.json"));
+		startRevivalClock(server);
 
 		if (!server.isHardcore()) {
 			// The mod does not depend on it; without the client mod, the hearts simply follow the world's setting
@@ -87,7 +92,26 @@ public class TimedHardcore implements ModInitializer {
 		}
 	}
 
+	/**
+	 * Checks every second whether someone's time is up. Not part of the server tick: a dedicated server
+	 * pauses its ticks when it has been empty for a while (pause-when-empty-seconds), and that is exactly
+	 * when dead players are waiting. The server keeps running queued tasks while paused, so the check is
+	 * queued onto the server thread from here.
+	 */
+	private static void startRevivalClock(MinecraftServer server) {
+		revivalClock = Executors.newSingleThreadScheduledExecutor(task -> {
+			Thread thread = new Thread(task, "Timed Hardcore revival clock");
+			thread.setDaemon(true);
+			return thread;
+		});
+		revivalClock.scheduleAtFixedRate(() -> server.execute(() -> announceRevivals(server)), 1, 1, TimeUnit.SECONDS);
+	}
+
 	private static void onServerStopped() {
+		if (revivalClock != null) {
+			revivalClock.shutdownNow();
+			revivalClock = null;
+		}
 		manager = null;
 		lives = null;
 		ClientSync.reset();
@@ -99,7 +123,6 @@ public class TimedHardcore implements ModInitializer {
 	private static void onTickEnd(MinecraftServer server) {
 		DeathHandler.onTickEnd(server);
 		if (manager != null && server.getTickCount() % SharedConstants.TICKS_PER_SECOND == 0) {
-			announceRevivals(server);
 			Graveyard.tick(server, manager);
 			refreshStatus(server);
 		}
@@ -147,6 +170,7 @@ public class TimedHardcore implements ModInitializer {
 		for (DeadPlayerManager.DeadPlayer deadPlayer : manager.collectExpired()) {
 			LOGGER.info("{} is alive again (time is up)", deadPlayer.name);
 			server.getPlayerList().broadcastSystemMessage(Messages.revivedByTime(deadPlayer), false);
+			DiscordWebhook.announceRevival(server, deadPlayer, null);
 			// A player who is online at that moment needs no hint in the server list
 			if (server.getPlayerList().getPlayer(deadPlayer.uuid) != null) {
 				manager.welcomeBack(deadPlayer.uuid);

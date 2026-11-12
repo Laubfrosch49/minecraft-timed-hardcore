@@ -17,9 +17,21 @@ import dev.laubfrosch.timedhardcore.ServerListMotd;
 import dev.laubfrosch.timedhardcore.TimedHardcore;
 import dev.laubfrosch.timedhardcore.TimedHardcoreConfig;
 import dev.laubfrosch.timedhardcore.TimedHardcoreGameRules;
+import com.sun.net.httpserver.HttpServer;
+import dev.laubfrosch.timedhardcore.DiscordWebhook;
 import io.netty.channel.embedded.EmbeddedChannel;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ConcurrentHashMap;
+import javax.imageio.ImageIO;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -31,6 +43,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.gametest.v1.GameTest;
@@ -104,6 +117,7 @@ public class TimedHardcoreGameTest {
 		config.safePlayerCount = 2;
 		config.extraLivesEnabled = true;
 		config.showRemainingTimeInMotd = true;
+		config.discordWebhookUrl = "";
 		// Saved as well, because /timedhardcore reload reads the file again
 		config.save();
 	}
@@ -451,6 +465,99 @@ public class TimedHardcoreGameTest {
 			}
 		}
 		healer.discard();
+		helper.succeed();
+	}
+
+	/**
+	 * Sends a death and a revival to a fake Discord on this machine, which also serves the player picture:
+	 * the death must arrive as multipart with a grey picture, the revival as JSON with the coloured picture.
+	 */
+	@GameTest
+	public void discordWebhook(GameTestHelper helper) throws Exception {
+		MinecraftServer server = helper.getLevel().getServer();
+		TimedHardcoreConfig config = TimedHardcore.config();
+		BlockingQueue<Map.Entry<String, byte[]>> posts = new LinkedBlockingQueue<>();
+		Set<String> requestedPictures = ConcurrentHashMap.newKeySet();
+		AtomicInteger webhookCalls = new AtomicInteger();
+
+		BufferedImage red = new BufferedImage(4, 4, BufferedImage.TYPE_INT_ARGB);
+		red.setRGB(0, 0, 0xFFFF0000);
+		ByteArrayOutputStream redPng = new ByteArrayOutputStream();
+		ImageIO.write(red, "png", redPng);
+
+		HttpServer discord = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+		discord.createContext("/render/", exchange -> {
+			requestedPictures.add(exchange.getRequestURI().getPath());
+			exchange.sendResponseHeaders(200, redPng.size());
+			exchange.getResponseBody().write(redPng.toByteArray());
+			exchange.close();
+		});
+		discord.createContext("/webhook", exchange -> {
+			byte[] body = exchange.getRequestBody().readAllBytes();
+			// The first request fails like a Discord hiccup: the message must be sent again, not lost
+			if (webhookCalls.getAndIncrement() == 0) {
+				exchange.sendResponseHeaders(503, -1);
+			} else {
+				posts.add(Map.entry(exchange.getRequestHeaders().getFirst("Content-Type"), body));
+				exchange.sendResponseHeaders(204, -1);
+			}
+			exchange.close();
+		});
+		discord.start();
+		String base = "http://127.0.0.1:" + discord.getAddress().getPort();
+		String previousImage = config.discordPlayerImage;
+		String previousHead = config.discordPlayerHead;
+		try {
+			config.discordWebhookUrl = base + "/webhook";
+			config.discordPlayerImage = base + "/render/{name}";
+			config.discordPlayerHead = base + "/render/head/{name}";
+
+			GameProfile profile = new GameProfile(UUID.randomUUID(), "jeb_");
+			long diedAt = System.currentTimeMillis() - 1000;
+			long reviveAt = diedAt + 3_600_000;
+			DiscordWebhook.announceDeath(server, profile, Component.literal("jeb_ was slain by @everyone"), diedAt, reviveAt);
+			DeadPlayerManager.DeadPlayer deadPlayer = new DeadPlayerManager.DeadPlayer();
+			deadPlayer.uuid = profile.id();
+			deadPlayer.name = profile.name();
+			deadPlayer.diedAt = diedAt;
+			deadPlayer.reviveAt = reviveAt;
+			DiscordWebhook.announceRevival(server, deadPlayer, "Admin");
+
+			// The worker thread does not need the server thread, so waiting here cannot block it
+			Map.Entry<String, byte[]> death = Objects.requireNonNull(posts.poll(15, TimeUnit.SECONDS), "The death should be posted (after one retry)");
+			Map.Entry<String, byte[]> revival = Objects.requireNonNull(posts.poll(10, TimeUnit.SECONDS), "The revival should be posted");
+
+			helper.assertTrue(requestedPictures.equals(Set.of("/render/jeb_", "/render/head/jeb_")), "Pictures requested by name: " + requestedPictures);
+			helper.assertTrue(death.getKey().startsWith("multipart/form-data"), "The death carries the grey pictures: " + death.getKey());
+			String deathBody = new String(death.getValue(), StandardCharsets.ISO_8859_1);
+			helper.assertTrue(deathBody.contains("\"author\":{\"name\":\"jeb_ died\",\"icon_url\":\"attachment://head.png\"}"),
+				"Name (plain text) and grey head at the top: " + deathBody);
+			helper.assertTrue(deathBody.contains("> **jeb\\\\_ was slain"), "Death message as a bold quote, name escaped: " + deathBody);
+			helper.assertFalse(deathBody.contains("\"title\""), "No title");
+			helper.assertTrue(deathBody.contains("attachment://dead.png") && deathBody.contains("filename=\"head.png\""), "Both pictures are attached");
+			helper.assertTrue(deathBody.contains("\"parse\":[]"), "Nobody gets pinged");
+			helper.assertTrue(deathBody.contains("<t:" + reviveAt / 1000 + ":R>"), "The revival is a Discord timestamp");
+			helper.assertTrue(deathBody.contains("\"color\":" + DiscordWebhook.DEATH_COLOR), "Grey stripe on death");
+
+			int png = deathBody.indexOf("\u0089PNG");
+			helper.assertTrue(png > 0, "The attachment is a PNG");
+			BufferedImage grey = ImageIO.read(new ByteArrayInputStream(death.getValue(), png, death.getValue().length - png));
+			int pixel = grey.getRGB(0, 0);
+			helper.assertTrue((pixel >> 16 & 0xFF) == (pixel & 0xFF) && (pixel >> 8 & 0xFF) == (pixel & 0xFF) && (pixel >>> 24) == 0xFF,
+				"The red pixel should be grey now: " + Integer.toHexString(pixel));
+			helper.assertTrue(grey.getRGB(1, 1) >>> 24 == 0, "Transparency stays");
+
+			helper.assertTrue(revival.getKey().startsWith("application/json"), "The revival is plain JSON: " + revival.getKey());
+			String revivalBody = new String(revival.getValue(), StandardCharsets.UTF_8);
+			helper.assertTrue(revivalBody.contains("Admin") && revivalBody.contains("\"color\":" + DiscordWebhook.REVIVAL_COLOR), "Revival: " + revivalBody);
+			helper.assertTrue(revivalBody.contains(base + "/render/jeb_\"") && revivalBody.contains(base + "/render/head/jeb_\""),
+				"The revival shows the coloured picture and head: " + revivalBody);
+		} finally {
+			config.discordWebhookUrl = "";
+			config.discordPlayerImage = previousImage;
+			config.discordPlayerHead = previousHead;
+			discord.stop(0);
+		}
 		helper.succeed();
 	}
 

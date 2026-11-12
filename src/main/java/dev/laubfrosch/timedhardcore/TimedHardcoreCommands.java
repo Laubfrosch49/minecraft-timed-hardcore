@@ -162,6 +162,7 @@ public final class TimedHardcoreCommands {
 		return manager.revive(name).map(deadPlayer -> {
 			// To everyone in chat (which also puts it into the server log)
 			source.getServer().getPlayerList().broadcastSystemMessage(Messages.revived(deadPlayer, source.getTextName()), false);
+			DiscordWebhook.announceRevival(source.getServer(), deadPlayer, source.getTextName());
 			return 1;
 		}).orElseGet(() -> {
 			source.sendFailure(Component.literal(name + " is not dead."));

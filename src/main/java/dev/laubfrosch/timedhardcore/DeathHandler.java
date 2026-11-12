@@ -79,6 +79,7 @@ public final class DeathHandler {
 		pendingDeathMessages.put(player.getUUID(), deathMessage);
 		pendingAnnouncements.put(player.getUUID(), Messages.deathBroadcast(profile, duration));
 		TimedHardcore.LOGGER.info("{} died and stays dead for {}", profile.name(), TimeFormat.duration(duration));
+		DiscordWebhook.announceDeath(player.level().getServer(), profile, deathMessage, now, revivalTime);
 	}
 
 	/**

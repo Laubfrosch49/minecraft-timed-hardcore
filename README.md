@@ -33,6 +33,7 @@ Timed Hardcore turns hardcore multiplayer into something you can actually play w
 - **Safe rule**: with enough players online, a death has no consequences. Dying only counts when you play alone.
 - **Extra life**: a green apple saves you once. It is only sold by the rare Wandering Healer.
 - **Graveyard**: an advancement tab that shows the rules of the server and everyone who is currently dead.
+- **Discord messages**: every death and revival is posted to a Discord channel, with a picture of the player in black and white or in colour.
 - **Always know where you stand**: a risk icon next to every name in the player list, and a notice with sound whenever your own risk changes.
 - **Keep your inventory**: players who stay dead keep their items and XP, controlled by a game rule.
 - **Easy to run**: every setting can be changed with a command or in a JSON file, without a restart.
@@ -78,6 +79,17 @@ The apple is sold by the **Wandering Healer**, a rare variant of the wandering t
 ### Graveyard
 
 The advancement screen gets a new tab, **Graveyard**. It always shows the current rules (revival, safe rule, extra life, inventory) and lists every dead player with their head, cause of death and time of revival. It works without the client mod.
+
+### Discord
+
+Paste a [Discord webhook](https://support.discord.com/hc/en-us/articles/228383668) into `discordWebhookUrl`, and the server posts a message for every timed death and every revival:
+
+Each message starts with the player's name and head.
+
+- **Death**: who died and how, how long they stay dead and when they come back, with a full-body picture of the player in **black and white**.
+- **Revival**: who is back, who revived them and what killed them, with the picture in **colour**.
+
+The time of revival is a Discord timestamp, so everyone sees it in their own time zone, with a live countdown. The pictures come from [NMSR](https://nmsr.nickac.dev/) and include the player's cape; any other render service can be set in `discordPlayerImage` and `discordPlayerHead`.
 
 ## Installation
 
@@ -146,7 +158,10 @@ The settings live in `config/timed-hardcore.json`. The file is created on the fi
   "safePlayerCount": 0,
   "extraLivesEnabled": true,
   "healerSpawnChance": 0.2,
-  "showRemainingTimeInMotd": true
+  "showRemainingTimeInMotd": true,
+  "discordWebhookUrl": "",
+  "discordPlayerImage": "https://nmsr.nickac.dev/fullbody/{player}",
+  "discordPlayerHead": "https://nmsr.nickac.dev/face/{player}"
 }
 ```
 
@@ -159,6 +174,9 @@ The settings live in `config/timed-hardcore.json`. The file is created on the fi
 | `extraLivesEnabled`       | `true`           | Enables the green apple and extra lives                                                             |
 | `healerSpawnChance`       | `0.2`            | Share of naturally spawned wandering traders that are healers, from `0` to `1`                      |
 | `showRemainingTimeInMotd` | `true`           | Lets the client mod show the remaining time in the server list                                      |
+| `discordWebhookUrl`       | empty            | Discord webhook for death and revival messages. Empty switches them off                             |
+| `discordPlayerImage`      | NMSR full body   | Picture of the player. `{player}` is the UUID in online mode, the name otherwise. Empty = no picture |
+| `discordPlayerHead`       | NMSR face        | Head next to the player's name at the top of the message. Same placeholders. Empty = no head        |
 
 ### Game rule
 
@@ -205,6 +223,12 @@ The time zone of the server. Many hosts run on UTC, so `00:00` may not be midnig
 <summary><b>What does the server list reveal?</b></summary>
 
 So that the client mod can find its own player, the server attaches the UUID and remaining time of every dead player to its server list response. Anyone who pings the server can read that. No names and no IP addresses are sent or stored. Set `showRemainingTimeInMotd` to `false` to switch it off.
+</details>
+
+<details>
+<summary><b>What do the Discord messages send, and where?</b></summary>
+
+The messages go only to the webhook you set. For the picture, the server asks the render service in `discordPlayerImage` for the player's UUID or name. Leave `discordWebhookUrl` empty and nothing is sent.
 </details>
 
 <details>
