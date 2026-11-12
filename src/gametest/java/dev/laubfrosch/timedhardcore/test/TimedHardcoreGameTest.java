@@ -468,9 +468,27 @@ public class TimedHardcoreGameTest {
 		helper.succeed();
 	}
 
+	/** A 4x4 picture, transparent except for one pixel in the given colour at the top left. */
+	private static byte[] png(int argb) throws IOException {
+		BufferedImage image = new BufferedImage(4, 4, BufferedImage.TYPE_INT_ARGB);
+		image.setRGB(0, 0, argb);
+		ByteArrayOutputStream out = new ByteArrayOutputStream();
+		ImageIO.write(image, "png", out);
+		return out.toByteArray();
+	}
+
+	/** The first PNG inside a multipart request (the reader stops at the end of the picture). */
+	private static BufferedImage firstAttachedPicture(byte[] multipart) throws IOException {
+		int start = new String(multipart, StandardCharsets.ISO_8859_1).indexOf("\u0089PNG");
+		if (start < 0) {
+			throw new IOException("No PNG attached");
+		}
+		return ImageIO.read(new ByteArrayInputStream(multipart, start, multipart.length - start));
+	}
+
 	/**
-	 * Sends a death and a revival to a fake Discord on this machine, which also serves the player picture:
-	 * the death must arrive as multipart with a grey picture, the revival as JSON with the coloured picture.
+	 * Sends a death and a revival to a fake Discord on this machine, which also serves the player pictures.
+	 * Both must arrive as multipart with the real skin attached: grey for the death, in colour for the revival.
 	 */
 	@GameTest
 	public void discordWebhook(GameTestHelper helper) throws Exception {
@@ -480,16 +498,21 @@ public class TimedHardcoreGameTest {
 		Set<String> requestedPictures = ConcurrentHashMap.newKeySet();
 		AtomicInteger webhookCalls = new AtomicInteger();
 
-		BufferedImage red = new BufferedImage(4, 4, BufferedImage.TYPE_INT_ARGB);
-		red.setRGB(0, 0, 0xFFFF0000);
-		ByteArrayOutputStream redPng = new ByteArrayOutputStream();
-		ImageIO.write(red, "png", redPng);
+		// The real skin is red, the stand-in of the render service is blue
+		byte[] redPng = png(0xFFFF0000);
+		byte[] bluePng = png(0xFF0000FF);
 
 		HttpServer discord = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
 		discord.createContext("/render/", exchange -> {
 			requestedPictures.add(exchange.getRequestURI().getPath());
-			exchange.sendResponseHeaders(200, redPng.size());
-			exchange.getResponseBody().write(redPng.toByteArray());
+			// Like a render service whose cache holds a stand-in: only a request that skips the cache gets the real skin
+			boolean cached = exchange.getRequestURI().getQuery() == null;
+			if (cached) {
+				exchange.getResponseHeaders().add("x-nmsr-fallback", "True");
+			}
+			byte[] picture = cached ? bluePng : redPng;
+			exchange.sendResponseHeaders(200, picture.length);
+			exchange.getResponseBody().write(picture);
 			exchange.close();
 		});
 		discord.createContext("/webhook", exchange -> {
@@ -534,24 +557,24 @@ public class TimedHardcoreGameTest {
 				"Name (plain text) and grey head at the top: " + deathBody);
 			helper.assertTrue(deathBody.contains("> **jeb\\\\_ was slain"), "Death message as a bold quote, name escaped: " + deathBody);
 			helper.assertFalse(deathBody.contains("\"title\""), "No title");
-			helper.assertTrue(deathBody.contains("attachment://dead.png") && deathBody.contains("filename=\"head.png\""), "Both pictures are attached");
+			helper.assertTrue(deathBody.contains("\"image\":{\"url\":\"attachment://player.png\"}") && deathBody.contains("filename=\"head.png\""),
+				"Both pictures are attached");
 			helper.assertTrue(deathBody.contains("\"parse\":[]"), "Nobody gets pinged");
 			helper.assertTrue(deathBody.contains("<t:" + reviveAt / 1000 + ":R>"), "The revival is a Discord timestamp");
 			helper.assertTrue(deathBody.contains("\"color\":" + DiscordWebhook.DEATH_COLOR), "Grey stripe on death");
 
-			int png = deathBody.indexOf("\u0089PNG");
-			helper.assertTrue(png > 0, "The attachment is a PNG");
-			BufferedImage grey = ImageIO.read(new ByteArrayInputStream(death.getValue(), png, death.getValue().length - png));
-			int pixel = grey.getRGB(0, 0);
-			helper.assertTrue((pixel >> 16 & 0xFF) == (pixel & 0xFF) && (pixel >> 8 & 0xFF) == (pixel & 0xFF) && (pixel >>> 24) == 0xFF,
-				"The red pixel should be grey now: " + Integer.toHexString(pixel));
+			BufferedImage grey = firstAttachedPicture(death.getValue());
+			// 0x4c is the brightness of red; the blue stand-in would be 0x1d
+			helper.assertTrue(grey.getRGB(0, 0) == 0xFF4C4C4C, "The real (red) skin, turned grey: " + Integer.toHexString(grey.getRGB(0, 0)));
 			helper.assertTrue(grey.getRGB(1, 1) >>> 24 == 0, "Transparency stays");
 
-			helper.assertTrue(revival.getKey().startsWith("application/json"), "The revival is plain JSON: " + revival.getKey());
-			String revivalBody = new String(revival.getValue(), StandardCharsets.UTF_8);
+			helper.assertTrue(revival.getKey().startsWith("multipart/form-data"), "The revival carries its pictures too: " + revival.getKey());
+			String revivalBody = new String(revival.getValue(), StandardCharsets.ISO_8859_1);
 			helper.assertTrue(revivalBody.contains("Admin") && revivalBody.contains("\"color\":" + DiscordWebhook.REVIVAL_COLOR), "Revival: " + revivalBody);
-			helper.assertTrue(revivalBody.contains(base + "/render/jeb_\"") && revivalBody.contains(base + "/render/head/jeb_\""),
-				"The revival shows the coloured picture and head: " + revivalBody);
+			helper.assertTrue(revivalBody.contains("\"image\":{\"url\":\"attachment://player.png\"}") && revivalBody.contains("\"icon_url\":\"attachment://head.png\""),
+				"The revival shows the uploaded picture and head: " + revivalBody);
+			int colour = firstAttachedPicture(revival.getValue()).getRGB(0, 0);
+			helper.assertTrue(colour == 0xFFFF0000, "The real (red) skin in colour: " + Integer.toHexString(colour));
 		} finally {
 			config.discordWebhookUrl = "";
 			config.discordPlayerImage = previousImage;
