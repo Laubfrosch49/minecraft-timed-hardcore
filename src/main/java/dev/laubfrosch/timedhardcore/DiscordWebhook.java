@@ -18,6 +18,10 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import javax.imageio.ImageIO;
@@ -26,12 +30,13 @@ import net.minecraft.server.MinecraftServer;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Posts timed deaths and revivals to a Discord channel through a webhook ({@link TimedHardcoreConfig#discordWebhookUrl}).
+ * Posts timed deaths and revivals to a Discord channel through a webhook ({@link TimedHardcoreConfig.Discord#webhookUrl}).
  *
- * <p>Each message is an embed with a picture of the player ({@link TimedHardcoreConfig#discordPlayerImage}):
+ * <p>Each message is an embed with a picture of the player ({@link TimedHardcoreConfig.Discord#playerImage}):
  * black and white on death, in colour on revival. The pictures are downloaded here and uploaded together
  * with the message: Discord cannot change the colours of an image itself, and an uploaded picture stays
- * even if the render service is gone one day.
+ * even if the render service is gone one day. With {@link TimedHardcoreConfig.DeathMedia#CLIP}, a death clip
+ * from the player's client ({@link DeathClips}) takes the place of the picture.
  *
  * <p>Everything that talks to the network runs on a single background thread: the server never waits
  * for Discord, and the messages arrive in the order in which they happened.
@@ -44,6 +49,7 @@ public final class DiscordWebhook {
 
 	private static final String IMAGE_NAME = "player.png";
 	private static final String HEAD_NAME = "head.png";
+	private static final String CLIP_NAME = "death.gif";
 	/** Set by the render service NMSR when it sends a default skin because it could not load the real one. */
 	private static final String FALLBACK_HEADER = "x-nmsr-fallback";
 	private static final int PICTURE_ATTEMPTS = 3;
@@ -68,19 +74,25 @@ public final class DiscordWebhook {
 
 	// --- Events ---
 
-	/** A player died and stays dead until {@code reviveAt}. */
-	public static void announceDeath(MinecraftServer server, GameProfile profile, Component deathMessage, long diedAt, long reviveAt) {
+	/**
+	 * A player died and stays dead until {@code reviveAt}.
+	 *
+	 * @param clip the death clip the player's client is uploading, or null if none was asked for;
+	 *     without a clip (or if it does not come) the message shows the grey picture
+	 */
+	public static void announceDeath(MinecraftServer server, GameProfile profile, Component deathMessage, long diedAt, long reviveAt,
+	                                 @Nullable CompletableFuture<byte @Nullable []> clip) {
 		TimedHardcoreConfig config = TimedHardcore.config();
 		URI webhook = webhookUri(config);
 		if (webhook == null) {
 			return;
 		}
 		// Collected here on the server thread, the background thread only gets plain values
-		String imageUrl = pictureUrl(config.discordPlayerImage, server, profile.id(), profile.name());
-		String headUrl = pictureUrl(config.discordPlayerHead, server, profile.id(), profile.name());
+		String imageUrl = pictureUrl(config.discord.playerImage, server, profile.id(), profile.name());
+		String headUrl = pictureUrl(config.discord.playerHead, server, profile.id(), profile.name());
 		JsonObject payload = deathPayload(profile.name(), deathMessage.getString(), diedAt, reviveAt);
 
-		send(webhook, payload, imageUrl, headUrl, true, "death of " + profile.name());
+		send(webhook, payload, imageUrl, headUrl, clip, true, "death of " + profile.name());
 	}
 
 	/**
@@ -101,23 +113,29 @@ public final class DiscordWebhook {
 			deadPlayer.diedAt, revivedAt, revivedBy);
 
 		send(webhook, payload,
-			pictureUrl(config.discordPlayerImage, server, deadPlayer.uuid, deadPlayer.name),
-			pictureUrl(config.discordPlayerHead, server, deadPlayer.uuid, deadPlayer.name),
-			false, "revival of " + deadPlayer.name);
+			pictureUrl(config.discord.playerImage, server, deadPlayer.uuid, deadPlayer.name),
+			pictureUrl(config.discord.playerHead, server, deadPlayer.uuid, deadPlayer.name),
+			null, false, "revival of " + deadPlayer.name);
 	}
 
 	/**
 	 * Fetches the pictures and posts the message, on the background thread. An unexpected error is logged
 	 * instead of vanishing with the task.
 	 *
+	 * @param clip death clip that replaces the full-body picture, if it arrives in time
 	 * @param grey turn the pictures black and white
 	 * @param what for the log, e.g. "death of Steve"
 	 */
-	private static void send(URI webhook, JsonObject payload, @Nullable String imageUrl, @Nullable String headUrl, boolean grey, String what) {
+	private static void send(URI webhook, JsonObject payload, @Nullable String imageUrl, @Nullable String headUrl,
+	                         @Nullable CompletableFuture<byte @Nullable []> clip, boolean grey, String what) {
 		WORKER.execute(() -> {
 			try {
 				Map<String, byte[]> files = new LinkedHashMap<>();
-				if (imageUrl != null) {
+				byte[] gif = waitFor(clip);
+				if (gif != null) {
+					files.put(CLIP_NAME, gif);
+					setImage(payload, "attachment://" + CLIP_NAME);
+				} else if (imageUrl != null) {
 					setImage(payload, attach(files, IMAGE_NAME, imageUrl, grey));
 				}
 				if (headUrl != null) {
@@ -128,6 +146,25 @@ public final class DiscordWebhook {
 				TimedHardcore.LOGGER.error("Discord message about the {} failed", what, e);
 			}
 		});
+	}
+
+	/**
+	 * Waits for the death clip. The worker thread waits, not the server; messages behind it wait as well,
+	 * so the order stays right.
+	 */
+	private static byte @Nullable [] waitFor(@Nullable CompletableFuture<byte @Nullable []> clip) {
+		if (clip == null) {
+			return null;
+		}
+		try {
+			// The clip completes by itself after DeathClips.TIMEOUT; the extra seconds are only a safety net
+			return clip.get(DeathClips.TIMEOUT.toSeconds() + 5, TimeUnit.SECONDS);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			return null;
+		} catch (ExecutionException | TimeoutException e) {
+			return null;
+		}
 	}
 
 	/**
@@ -362,21 +399,21 @@ public final class DiscordWebhook {
 	 * <p>Network errors, Discord's own server errors (5xx) and rate limits (429) are tried again, up to three attempts.
 	 * The webhook URL is never logged: it contains the secret token.
 	 *
-	 * @param pngs PNG pictures to upload, by file name; may be empty
+	 * @param files pictures to upload (PNG, or GIF if the name ends in .gif), by file name; may be empty
 	 * @param what for the log, e.g. "death of Steve"
 	 * @return the last HTTP status, or -1 if Discord could not be reached
 	 */
-	public static int post(URI webhook, JsonObject payload, Map<String, byte[]> pngs, String what) {
+	public static int post(URI webhook, JsonObject payload, Map<String, byte[]> files, String what) {
 		HttpRequest.Builder builder = HttpRequest.newBuilder(webhook)
 			.timeout(TIMEOUT)
 			.header("User-Agent", USER_AGENT);
-		if (pngs.isEmpty()) {
+		if (files.isEmpty()) {
 			builder.header("Content-Type", "application/json")
 				.POST(HttpRequest.BodyPublishers.ofString(payload.toString()));
 		} else {
 			String boundary = "TimedHardcore" + UUID.randomUUID().toString().replace("-", "");
 			builder.header("Content-Type", "multipart/form-data; boundary=" + boundary)
-				.POST(HttpRequest.BodyPublishers.ofByteArray(multipart(boundary, payload, pngs)));
+				.POST(HttpRequest.BodyPublishers.ofByteArray(multipart(boundary, payload, files)));
 		}
 		HttpRequest request = builder.build();
 
@@ -414,18 +451,18 @@ public final class DiscordWebhook {
 		return status;
 	}
 
-	private static byte[] multipart(String boundary, JsonObject payload, Map<String, byte[]> pngs) {
+	private static byte[] multipart(String boundary, JsonObject payload, Map<String, byte[]> files) {
 		ByteArrayOutputStream body = new ByteArrayOutputStream();
 		body.writeBytes(("--" + boundary + "\r\n"
 			+ "Content-Disposition: form-data; name=\"payload_json\"\r\n"
 			+ "Content-Type: application/json\r\n\r\n"
 			+ payload + "\r\n").getBytes(StandardCharsets.UTF_8));
 		int index = 0;
-		for (Map.Entry<String, byte[]> png : pngs.entrySet()) {
+		for (Map.Entry<String, byte[]> file : files.entrySet()) {
 			body.writeBytes(("--" + boundary + "\r\n"
-				+ "Content-Disposition: form-data; name=\"files[" + index++ + "]\"; filename=\"" + png.getKey() + "\"\r\n"
-				+ "Content-Type: image/png\r\n\r\n").getBytes(StandardCharsets.UTF_8));
-			body.writeBytes(png.getValue());
+				+ "Content-Disposition: form-data; name=\"files[" + index++ + "]\"; filename=\"" + file.getKey() + "\"\r\n"
+				+ "Content-Type: " + (file.getKey().endsWith(".gif") ? "image/gif" : "image/png") + "\r\n\r\n").getBytes(StandardCharsets.UTF_8));
+			body.writeBytes(file.getValue());
 			body.writeBytes("\r\n".getBytes(StandardCharsets.UTF_8));
 		}
 		body.writeBytes(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
@@ -442,8 +479,8 @@ public final class DiscordWebhook {
 		}
 	}
 
+	/** The webhook to post to, or null if none is set or the messages are disabled. */
 	private static @Nullable URI webhookUri(TimedHardcoreConfig config) {
-		String url = config.discordWebhookUrl;
-		return url == null || url.isBlank() ? null : URI.create(url.trim());
+		return config.discord.active() ? URI.create(config.discord.webhookUrl.trim()) : null;
 	}
 }

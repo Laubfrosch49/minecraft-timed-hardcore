@@ -123,7 +123,8 @@ public final class Messages {
 			.append(" ")
 			.append(deathMessage.copy().withColor(LIGHT))
 			.append("\n\n")
-			.append(durationLine("You are dead for", deadPlayer.remainingMillis()))
+			// The whole time from the death on: the kick can come a few seconds later (death clip upload)
+			.append(durationLine("You are dead for", deadPlayer.reviveAt - deadPlayer.diedAt))
 			.append("\n")
 			.append(reviveLine(deadPlayer.reviveAt));
 	}

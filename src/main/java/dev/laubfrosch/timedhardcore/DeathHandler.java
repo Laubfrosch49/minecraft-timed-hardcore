@@ -28,11 +28,16 @@ public final class DeathHandler {
 	/** Players to respawn (and kick, if they stay dead) at the end of the tick. */
 	private static final Set<UUID> pendingRespawn = ConcurrentHashMap.newKeySet();
 
-	/** Death message for the kick screen, kept until the player is kicked at the end of the tick. */
-	private static final Map<UUID, Component> pendingDeathMessages = new ConcurrentHashMap<>();
+	/**
+	 * Players who died a timed death and are kicked at the end of the tick, or once their death clip has arrived.
+	 * Kept with the death message for the kick screen. A player in here is kicked even if their time ran out
+	 * meanwhile: with a very short death time the upload of the clip can take longer than being dead, and without
+	 * a clip they would have been kicked right away. Only a revival by command takes them out ({@link #cancelKick}).
+	 */
+	private static final Map<UUID, PendingKick> pendingKicks = new ConcurrentHashMap<>();
 
-	/** Chat announcements of timed deaths, held back until the player has left the game. */
-	private static final Map<UUID, Component> pendingAnnouncements = new ConcurrentHashMap<>();
+	private record PendingKick(DeadPlayerManager.DeadPlayer deadPlayer, Component deathMessage) {
+	}
 
 	private DeathHandler() {
 	}
@@ -76,10 +81,11 @@ public final class DeathHandler {
 		manager.markDead(profile.id(), profile.name(), now, revivalTime,
 			Graveyard.encodeDeathMessage(player.level().getServer().registryAccess(), deathMessage));
 		pendingRespawn.add(player.getUUID());
-		pendingDeathMessages.put(player.getUUID(), deathMessage);
-		pendingAnnouncements.put(player.getUUID(), Messages.deathBroadcast(profile, duration));
+		manager.getActive(profile.id()).ifPresent(deadPlayer -> pendingKicks.put(player.getUUID(), new PendingKick(deadPlayer, deathMessage)));
+		// Right away, together with the death message; the kick can follow seconds later (death clip upload)
+		player.level().getServer().getPlayerList().broadcastSystemMessage(Messages.deathBroadcast(profile, duration), false);
 		TimedHardcore.LOGGER.info("{} died and stays dead for {}", profile.name(), TimeFormat.duration(duration));
-		DiscordWebhook.announceDeath(player.level().getServer(), profile, deathMessage, now, revivalTime);
+		DiscordWebhook.announceDeath(player.level().getServer(), profile, deathMessage, now, revivalTime, DeathClips.request(player));
 	}
 
 	/**
@@ -115,25 +121,6 @@ public final class DeathHandler {
 	/** Called at the end of every server tick. */
 	public static void onTickEnd(MinecraftServer server) {
 		processPendingRespawns(server);
-		announceTimedDeaths(server);
-	}
-
-	/**
-	 * Tells everyone in chat who stays dead and for how long. The message waits until the player is
-	 * gone, so it appears after "... left the game"; the kick can take a few ticks to complete.
-	 */
-	private static void announceTimedDeaths(MinecraftServer server) {
-		DeadPlayerManager manager = TimedHardcore.manager();
-		pendingAnnouncements.entrySet().removeIf(entry -> {
-			UUID uuid = entry.getKey();
-			boolean online = server.getPlayerList().getPlayer(uuid) != null;
-			boolean kickPending = manager != null && manager.getActive(uuid).isPresent();
-			if (online && kickPending) {
-				return false;
-			}
-			server.getPlayerList().broadcastSystemMessage(entry.getValue(), false);
-			return true;
-		});
 	}
 
 	/**
@@ -150,7 +137,12 @@ public final class DeathHandler {
 
 		for (UUID uuid : todo) {
 			ServerPlayer player = server.getPlayerList().getPlayer(uuid);
-			Component deathMessage = pendingDeathMessages.remove(uuid);
+			if (player != null && DeathClips.isWaitingFor(uuid)) {
+				// The client is still uploading its death clip; a kicked client could not finish
+				pendingRespawn.add(uuid);
+				continue;
+			}
+			PendingKick kick = pendingKicks.remove(uuid);
 			if (player == null) {
 				continue;
 			}
@@ -158,18 +150,28 @@ public final class DeathHandler {
 			if (player.isDeadOrDying()) {
 				connection.handleClientCommand(new ServerboundClientCommandPacket(ServerboundClientCommandPacket.Action.PERFORM_RESPAWN));
 			}
-			kickIfDead(connection, uuid, deathMessage);
+			kickIfDead(connection, uuid, kick);
 		}
 	}
 
-	private static void kickIfDead(ServerGamePacketListenerImpl connection, UUID uuid, @Nullable Component deathMessage) {
+	/** Kicks a player who just died a timed death, or one who joined while still dead. */
+	private static void kickIfDead(ServerGamePacketListenerImpl connection, UUID uuid, @Nullable PendingKick kick) {
 		DeadPlayerManager manager = TimedHardcore.manager();
 		if (manager == null) {
 			return;
 		}
 		// After the respawn the connection holds a new player object
 		GameProfile profile = connection.player.getGameProfile();
-		Component message = deathMessage != null ? deathMessage : Component.literal(profile.name() + " died");
-		manager.getActive(uuid).ifPresent(deadPlayer -> connection.disconnect(Messages.deathKick(deadPlayer, profile, message)));
+		DeadPlayerManager.DeadPlayer deadPlayer = kick != null ? kick.deadPlayer() : manager.getActive(uuid).orElse(null);
+		if (deadPlayer == null) {
+			return;
+		}
+		Component message = kick != null ? kick.deathMessage() : Component.literal(profile.name() + " died");
+		connection.disconnect(Messages.deathKick(deadPlayer, profile, message));
+	}
+
+	/** The player was revived by command before the kick (while their death clip uploaded): they are not kicked. */
+	public static void cancelKick(UUID uuid) {
+		pendingKicks.remove(uuid);
 	}
 }

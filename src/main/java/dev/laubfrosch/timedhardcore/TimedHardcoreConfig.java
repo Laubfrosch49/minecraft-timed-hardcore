@@ -2,6 +2,9 @@ package dev.laubfrosch.timedhardcore;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -18,6 +21,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -63,21 +67,62 @@ public class TimedHardcoreConfig {
      */
     public boolean showRemainingTimeInMotd = true;
 
-    /**
-     * Discord webhook that receives a message for every timed death and revival
-     * (Discord: Server Settings → Integrations → Webhooks → Copy Webhook URL). Empty = off.
-     */
-    public String discordWebhookUrl = "";
+    /** Messages in a Discord channel for every timed death and revival. */
+    public Discord discord = new Discord();
 
-    /**
-     * Picture of the player in the Discord messages: black and white on death, in colour on revival.
-     * {player} becomes the UUID on servers in online mode and the name otherwise; {uuid} and {name} also work.
-     * Empty = no picture.
-     */
-    public String discordPlayerImage = "https://nmsr.nickac.dev/fullbody/{player}";
+    /** The settings of the Discord messages, as their own object {@code "discord"} in the file. */
+    public static class Discord {
 
-    /** Head of the player next to their name at the top of the Discord messages. Same placeholders, empty = no head. */
-    public String discordPlayerHead = "https://nmsr.nickac.dev/face/{player}";
+        /**
+         * Discord webhook that receives a message for every timed death and revival
+         * (Discord: Server Settings → Integrations → Webhooks → Copy Webhook URL). Empty = off.
+         */
+        public String webhookUrl = "";
+
+        /**
+         * false sends nothing, without losing the webhook (/timedhardcore discord disable). Deaths and revivals
+         * meanwhile are not sent later, and no death clips are recorded.
+         */
+        public boolean enabled = true;
+
+        /** What the message shows of a death: PICTURE or CLIP. */
+        public DeathMedia deathMedia = DeathMedia.PICTURE;
+
+        /**
+         * Picture of the player in the messages: black and white on death, in colour on revival.
+         * {player} becomes the UUID on servers in online mode and the name otherwise; {uuid} and {name} also work.
+         * Empty = no picture.
+         */
+        public String playerImage = "https://nmsr.nickac.dev/fullbody/{player}";
+
+        /** Head of the player next to their name at the top of the messages. Same placeholders, empty = no head. */
+        public String playerHead = "https://nmsr.nickac.dev/face/{player}";
+
+        /** Is a webhook set? */
+        public boolean configured() {
+            return webhookUrl != null && !webhookUrl.isBlank();
+        }
+
+        /** Are messages sent right now: webhook set and enabled? */
+        public boolean active() {
+            return configured() && enabled;
+        }
+    }
+
+    public enum DeathMedia {
+        /** Full-body picture of the player in black and white ({@link Discord#playerImage}). */
+        PICTURE,
+        /**
+         * The last seconds before the death as an animated GIF, recorded by the player's client mod.
+         * Every player decides whether that is only the game world or also their HUD and chat, or nothing;
+         * players without the client mod, or who share nothing, get the picture instead.
+         */
+        CLIP;
+
+        public boolean isClip() {
+            return this != PICTURE;
+        }
+    }
 
     /** Are enough players online that a death has no consequences? */
     public boolean isSafe(int onlinePlayers) {
@@ -171,9 +216,59 @@ public class TimedHardcoreConfig {
         if (healerSpawnChance < 0 || healerSpawnChance > 1) {
             throw new IllegalArgumentException("healerSpawnChance must be between 0 and 1");
         }
-        validateUrl("discordWebhookUrl", discordWebhookUrl);
-        validateUrl("discordPlayerImage", withoutPlaceholders(discordPlayerImage));
-        validateUrl("discordPlayerHead", withoutPlaceholders(discordPlayerHead));
+        if (discord == null) {
+            discord = new Discord();
+        }
+        validateUrl("discord.webhookUrl", discord.webhookUrl);
+        if (discord.deathMedia == null) {
+            throw new IllegalArgumentException("discord.deathMedia must be PICTURE or CLIP");
+        }
+        validateUrl("discord.playerImage", withoutPlaceholders(discord.playerImage));
+        validateUrl("discord.playerHead", withoutPlaceholders(discord.playerHead));
+    }
+
+    /** Settings of older versions that moved into {@code "discord"}: old name → new name there. */
+    private static final Map<String, String> MOVED_TO_DISCORD = Map.of(
+        "discordWebhookUrl", "webhookUrl",
+        "discordPlayerImage", "playerImage",
+        "discordPlayerHead", "playerHead",
+        "discordDeathMedia", "deathMedia");
+
+    /**
+     * Reads the settings from the text of the file. Files of older versions are converted: the Discord settings
+     * (up to 1.1 at the top level, e.g. {@code discordWebhookUrl}) move into {@code "discord"}.
+     *
+     * @throws Exception if the text is invalid
+     */
+    public static TimedHardcoreConfig parse(String json) throws Exception {
+        JsonElement root = JsonParser.parseString(json);
+        if (!root.isJsonObject()) {
+            return new TimedHardcoreConfig();
+        }
+        JsonObject object = root.getAsJsonObject();
+        for (Map.Entry<String, String> moved : MOVED_TO_DISCORD.entrySet()) {
+            JsonElement value = object.remove(moved.getKey());
+            if (value == null) {
+                continue;
+            }
+            if (!object.has("discord") || !object.get("discord").isJsonObject()) {
+                object.add("discord", new JsonObject());
+            }
+            JsonObject discord = object.getAsJsonObject("discord");
+            // A value already in the new place wins
+            if (!discord.has(moved.getValue())) {
+                discord.add(moved.getValue(), value);
+            }
+            TimedHardcore.LOGGER.info("Config: moved {} to discord.{}", moved.getKey(), moved.getValue());
+        }
+        TimedHardcoreConfig config = GSON.fromJson(object, TimedHardcoreConfig.class);
+        config.validate();
+        return config;
+    }
+
+    /** The settings as they are written to the file. */
+    public String toJson() {
+        return GSON.toJson(this);
     }
 
     private static @Nullable String withoutPlaceholders(@Nullable String template) {
@@ -201,15 +296,8 @@ public class TimedHardcoreConfig {
      * @throws Exception if the file is invalid (it is left untouched in that case)
      */
     public static TimedHardcoreConfig load() throws Exception {
-        TimedHardcoreConfig config = new TimedHardcoreConfig();
-        if (Files.exists(FILE)) {
-            TimedHardcoreConfig loaded = GSON.fromJson(Files.readString(FILE), TimedHardcoreConfig.class);
-            if (loaded != null) {
-                config = loaded;
-            }
-            config.validate();
-        }
-        // Writes missing fields back with their default values
+        TimedHardcoreConfig config = Files.exists(FILE) ? parse(Files.readString(FILE)) : new TimedHardcoreConfig();
+        // Writes missing fields back with their default values, and files of older versions in the new form
         config.save();
         return config;
     }
@@ -217,7 +305,7 @@ public class TimedHardcoreConfig {
     public void save() {
         try {
             Files.createDirectories(FILE.getParent());
-            Files.writeString(FILE, GSON.toJson(this));
+            Files.writeString(FILE, toJson());
         } catch (IOException e) {
             TimedHardcore.LOGGER.error("{} could not be saved", FILE, e);
         }
