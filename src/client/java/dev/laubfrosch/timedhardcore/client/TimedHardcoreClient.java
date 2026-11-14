@@ -3,7 +3,9 @@ package dev.laubfrosch.timedhardcore.client;
 import dev.laubfrosch.timedhardcore.Risk;
 import dev.laubfrosch.timedhardcore.network.TimedHardcoreNetwork;
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import org.jspecify.annotations.Nullable;
 
@@ -23,9 +25,22 @@ public class TimedHardcoreClient implements ClientModInitializer {
 			(payload, _) -> risk = payload.risk());
 		ClientPlayNetworking.registerGlobalReceiver(TimedHardcoreNetwork.AppleEatenPayload.TYPE,
 			(_, _) -> appleActivationPending = true);
+
+		ClientSettings.load();
+		// Times of revival and death in chat (e.g. /timedhardcore info) in the player's own time zone
+		ClientReceiveMessageEvents.MODIFY_GAME.register((message, _) -> LocalTimes.localize(message));
+		ClipNotice.register();
+		ClientPlayNetworking.registerGlobalReceiver(TimedHardcoreNetwork.ClipSettingsPayload.TYPE,
+			(payload, _) -> DeathClipRecorder.setRequestedByServer(payload.clips()));
+		ClientPlayNetworking.registerGlobalReceiver(TimedHardcoreNetwork.ClipRequestPayload.TYPE,
+			(_, _) -> DeathClipRecorder.onTimedDeath());
+		ClientTickEvents.END_CLIENT_TICK.register(DeathClipRecorder::tick);
+		ClientPlayConnectionEvents.JOIN.register((_, _, client) -> DeathClipRecorder.onJoin(ClipNotice.serverKey(client)));
+
 		ClientPlayConnectionEvents.DISCONNECT.register((_, _) -> {
 			risk = null;
 			appleActivationPending = false;
+			DeathClipRecorder.onDisconnect();
 		});
 	}
 

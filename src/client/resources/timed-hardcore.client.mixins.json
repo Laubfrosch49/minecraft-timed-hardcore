@@ -4,14 +4,24 @@
 	"compatibilityLevel": "JAVA_25",
 	"client": [
 		"ClientPacketListenerDeathScreenMixin",
+		"ClientCommonPacketListenerImplAccessor",
+		"ClientCommonPacketListenerImplLocalTimesMixin",
+		"ClientHandshakePacketListenerImplLocalTimesMixin",
 		"ClientPacketListenerMixin",
+		"ClientPacketListenerRespawnMixin",
+		"DeathScreenMixin",
+		"DisplayInfoLocalTimesMixin",
+		"GameRendererMixin",
 		"GuiDeathScreenMixin",
 		"HeartTypeMixin",
 		"HudMixin",
 		"LivingEntityRendererMixin",
+		"ManageServerScreenMixin",
+		"ScreenBackgroundMixin",
 		"ServerStatusPingerMixin",
 		"VillagerRenderStateMixin",
-		"WanderingTraderRendererMixin"
+		"WanderingTraderRendererMixin",
+		"WorldOptionsScreenMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

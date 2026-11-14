@@ -23,6 +23,7 @@ import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.commands.arguments.GameProfileArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.NameAndId;
 import net.minecraft.util.Prediction;
@@ -78,6 +79,10 @@ public final class TimedHardcoreCommands {
 				.executes(ctx -> showSafe(ctx.getSource()))
 				.then(Commands.argument("count", IntegerArgumentType.integer(0))
 					.executes(ctx -> setSafe(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "count")))))
+			.then(operatorOnly("discord")
+				.executes(ctx -> showDiscord(ctx.getSource()))
+				.then(Commands.literal("enable").executes(ctx -> setDiscordEnabled(ctx.getSource(), true)))
+				.then(Commands.literal("disable").executes(ctx -> setDiscordEnabled(ctx.getSource(), false))))
 			.then(operatorOnly("life")
 				.then(Commands.literal("give").then(Commands.argument("player", GameProfileArgument.gameProfile())
 					.executes(ctx -> giveLife(ctx.getSource(), GameProfileArgument.getGameProfiles(ctx, "player")))))
@@ -101,7 +106,7 @@ public final class TimedHardcoreCommands {
 			.executes(ctx -> revive(ctx.getSource(), StringArgumentType.getString(ctx, "player")));
 	}
 
-	private static Component success(String text) {
+	private static MutableComponent success(String text) {
 		return Component.literal(text).withStyle(ChatFormatting.GREEN);
 	}
 
@@ -160,6 +165,8 @@ public final class TimedHardcoreCommands {
 			return 0;
 		}
 		return manager.revive(name).map(deadPlayer -> {
+			// Revived while the death clip was still uploading: no kick, the player stays in the game
+			DeathHandler.cancelKick(deadPlayer.uuid);
 			// To everyone in chat (which also puts it into the server log)
 			source.getServer().getPlayerList().broadcastSystemMessage(Messages.revived(deadPlayer, source.getTextName()), false);
 			DiscordWebhook.announceRevival(source.getServer(), deadPlayer, source.getTextName());
@@ -213,8 +220,9 @@ public final class TimedHardcoreCommands {
 			: TimedHardcore.recalculateRevivals(source.getServer());
 		TimedHardcore.announceRevivals(source.getServer());
 		int dead = manager.stillDead().size();
-		source.sendSuccess(() -> success("Timed Hardcore reloaded: " + plural(dead, "dead player", "dead players")
-			+ ", revival " + TimedHardcore.config().describe() + "." + recalculatedNote(recalculated)), true);
+		source.sendSuccess(() -> success("Timed Hardcore reloaded: " + plural(dead, "dead player", "dead players") + ", revival ")
+			.append(TimedHardcore.config().describe())
+			.append("." + recalculatedNote(recalculated)), true);
 		return 1;
 	}
 
@@ -242,7 +250,7 @@ public final class TimedHardcoreCommands {
 	// --- Revival settings ---
 
 	private static int showRevival(CommandSourceStack source) {
-		source.sendSuccess(() -> Component.literal("Revival: " + TimedHardcore.config().describe()), false);
+		source.sendSuccess(() -> Component.literal("Revival: ").append(TimedHardcore.config().describe()), false);
 		return 1;
 	}
 
@@ -291,7 +299,7 @@ public final class TimedHardcoreCommands {
 	private static int saveRevival(CommandSourceStack source, TimedHardcoreConfig config) {
 		config.save();
 		int recalculated = TimedHardcore.recalculateRevivals(source.getServer());
-		source.sendSuccess(() -> success("Revival is now " + config.describe() + "." + recalculatedNote(recalculated)), true);
+		source.sendSuccess(() -> success("Revival is now ").append(config.describe()).append("." + recalculatedNote(recalculated)), true);
 		return 1;
 	}
 
@@ -313,6 +321,54 @@ public final class TimedHardcoreCommands {
 		config.safePlayerCount = count;
 		config.save();
 		source.sendSuccess(() -> success(describeSafe(count)), true);
+		return 1;
+	}
+
+	// --- Discord ---
+
+	/** How to set up the webhook; the URL itself is never shown, it contains the secret token of the webhook. */
+	private static final String NO_WEBHOOK = "No Discord webhook is set. Put its URL into \"deathWebhookUrl\" and/or "
+		+ "\"revivalWebhookUrl\" under \"discord\" in config/timed-hardcore.json, then run /timedhardcore reload.";
+
+	private static String describeDiscord(TimedHardcoreConfig.Discord discord) {
+		if (!discord.configured()) {
+			return NO_WEBHOOK;
+		}
+		if (!discord.enabled) {
+			return "Discord messages are disabled. Enable them with /timedhardcore discord enable.";
+		}
+		String deaths = discord.postsDeaths() ? "deaths (with " + (discord.deathMedia.isClip() ? "a death clip" : "a picture") + ")" : null;
+		String revivals = discord.postsRevivals() ? "revivals" : null;
+		String what = deaths != null && revivals != null ? deaths + " and " + revivals : deaths != null ? deaths + " only" : revivals + " only";
+		return "Discord messages are enabled: " + what + ".";
+	}
+
+	private static int showDiscord(CommandSourceStack source) {
+		TimedHardcoreConfig.Discord discord = TimedHardcore.config().discord;
+		if (!discord.configured()) {
+			source.sendFailure(Component.literal(NO_WEBHOOK));
+			return 0;
+		}
+		source.sendSuccess(() -> Component.literal(describeDiscord(discord)), false);
+		return 1;
+	}
+
+	/** Enables or disables the Discord messages; saved in the config, so it also lasts over a restart. */
+	private static int setDiscordEnabled(CommandSourceStack source, boolean enabled) {
+		TimedHardcoreConfig config = TimedHardcore.config();
+		if (!config.discord.configured()) {
+			source.sendFailure(Component.literal(NO_WEBHOOK));
+			return 0;
+		}
+		if (config.discord.enabled == enabled) {
+			source.sendFailure(Component.literal(enabled ? "Discord messages are already enabled." : "Discord messages are already disabled."));
+			return 0;
+		}
+		config.discord.enabled = enabled;
+		config.save();
+		source.sendSuccess(() -> success(enabled
+			? "Discord messages enabled."
+			: "Discord messages disabled. Deaths and revivals are not sent until /timedhardcore discord enable."), true);
 		return 1;
 	}
 

@@ -13,6 +13,7 @@ import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.SharedConstants;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
@@ -48,6 +49,9 @@ public class TimedHardcore implements ModInitializer {
 
 		TimedHardcoreGameRules.register();
 		TimedHardcoreNetwork.register();
+		ServerPlayNetworking.registerGlobalReceiver(TimedHardcoreNetwork.ClipPayload.TYPE,
+			(payload, context) -> DeathClips.receive(context.player(), payload.gif()));
+		DeathClips.registerJoinNotice();
 		CommandRegistrationCallback.EVENT.register((dispatcher, _, _) ->
 			TimedHardcoreCommands.register(dispatcher));
 
@@ -118,6 +122,7 @@ public class TimedHardcore implements ModInitializer {
 		Graveyard.reset();
 		TabListStatus.reset();
 		RiskNotifier.reset();
+		DeathClips.reset();
 	}
 
 	private static void onTickEnd(MinecraftServer server) {
@@ -132,6 +137,7 @@ public class TimedHardcore implements ModInitializer {
 		ClientSync.forget(player);
 		TabListStatus.forget(player);
 		RiskNotifier.forget(player);
+		DeathClips.forget(player);
 	}
 
 	/** Shows all players their current risk: hearts (client mod), player list and a notice on change. */

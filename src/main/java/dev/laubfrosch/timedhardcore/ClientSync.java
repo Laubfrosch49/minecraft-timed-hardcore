@@ -18,6 +18,8 @@ public final class ClientSync {
 
 	/** Last risk sent to each player. */
 	private static final Map<UUID, Risk> sentRisks = new ConcurrentHashMap<>();
+	/** Last clip setting sent to each player. */
+	private static final Map<UUID, Boolean> sentClipSettings = new ConcurrentHashMap<>();
 
 	private ClientSync() {
 	}
@@ -27,8 +29,12 @@ public final class ClientSync {
 		return player != null && ServerPlayNetworking.canSend(player, TimedHardcoreNetwork.RiskPayload.TYPE);
 	}
 
-	/** Sends clients with the mod their risk, which decides how hearts and death screen look. */
+	/**
+	 * Sends clients with the mod their risk, which decides how hearts and death screen look,
+	 * and whether they should record death clips.
+	 */
 	public static void tick(MinecraftServer server) {
+		boolean clips = DeathClips.wanted(TimedHardcore.config());
 		for (ServerPlayer player : server.getPlayerList().getPlayers()) {
 			if (!hasClientMod(player)) {
 				continue;
@@ -36,6 +42,11 @@ public final class ClientSync {
 			Risk risk = Risk.of(player);
 			if (sentRisks.put(player.getUUID(), risk) != risk) {
 				ServerPlayNetworking.send(player, new TimedHardcoreNetwork.RiskPayload(risk));
+			}
+			// Older client mods do not know clips
+			if (ServerPlayNetworking.canSend(player, TimedHardcoreNetwork.ClipSettingsPayload.TYPE)
+				&& !Boolean.valueOf(clips).equals(sentClipSettings.put(player.getUUID(), clips))) {
+				ServerPlayNetworking.send(player, new TimedHardcoreNetwork.ClipSettingsPayload(clips));
 			}
 		}
 	}
@@ -58,9 +69,11 @@ public final class ClientSync {
 
 	public static void forget(UUID player) {
 		sentRisks.remove(player);
+		sentClipSettings.remove(player);
 	}
 
 	public static void reset() {
 		sentRisks.clear();
+		sentClipSettings.clear();
 	}
 }

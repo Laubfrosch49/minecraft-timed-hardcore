@@ -109,7 +109,7 @@ public final class Messages {
 		return Component.empty()
 			.append(totem())
 			.append(text(" Revival on ", MUTED))
-			.append(text(TimeFormat.date(reviveAt), GREEN));
+			.append(TimeFormat.date(reviveAt).withColor(GREEN));
 	}
 
 	// --- Timed death ---
@@ -123,7 +123,8 @@ public final class Messages {
 			.append(" ")
 			.append(deathMessage.copy().withColor(LIGHT))
 			.append("\n\n")
-			.append(durationLine("You are dead for", deadPlayer.remainingMillis()))
+			// The whole time from the death on: the kick can come a few seconds later (death clip upload)
+			.append(durationLine("You are dead for", deadPlayer.reviveAt - deadPlayer.diedAt))
 			.append("\n")
 			.append(reviveLine(deadPlayer.reviveAt));
 	}
@@ -315,7 +316,7 @@ public final class Messages {
 		MutableComponent info = header("TIMED HARDCORE");
 
 		info.append(deathsCount
-			? infoLine(clock(), "Revival", config.describe(), LIGHT, " · if you died now: " + TimeFormat.date(revivalTime))
+			? infoLine(clock(), "Revival", config.describe(), LIGHT, text(" · if you died now: ", MUTED).append(TimeFormat.date(revivalTime)))
 			: infoLine(clock(), "Revival", "at once", GREEN, " · deaths have no consequences"));
 
 		info.append(config.safePlayerCount > 0
@@ -341,12 +342,16 @@ public final class Messages {
 
 	/** One line of the info: icon, label, value, and a note in gray. Starts on a new line. */
 	private static MutableComponent infoLine(Component icon, String label, String value, int valueColor, String note) {
+		return infoLine(icon, label, Component.literal(value), valueColor, text(note, MUTED));
+	}
+
+	private static MutableComponent infoLine(Component icon, String label, MutableComponent value, int valueColor, Component note) {
 		return Component.empty()
 			.append("\n")
 			.append(icon)
 			.append(bold(" " + label + ": ", GOLD))
-			.append(text(value, valueColor))
-			.append(text(note, MUTED));
+			.append(value.withColor(valueColor))
+			.append(note);
 	}
 
 	private static Component commandButton() {
@@ -400,7 +405,9 @@ public final class Messages {
 			case TIMED_DEATH -> Component.empty()
 				.append(text("Dying now means staying ", MUTED))
 				.append(text("dead", BLOOD))
-				.append(text(" until " + TimeFormat.date(revivalTime) + ".", MUTED))
+				.append(text(" until ", MUTED))
+				.append(TimeFormat.date(revivalTime).withColor(MUTED))
+				.append(text(".", MUTED))
 				.append(safePlayerCount > 0
 					? text("\nSafe only from " + safePlayerCount + " players online (currently " + onlinePlayers + ").", MUTED)
 					: Component.empty());
@@ -427,7 +434,9 @@ public final class Messages {
 			.append(text(" " + deadPlayer.name, LIGHT))
 			.append(text(" – ", MUTED))
 			.append(text(TimeFormat.duration(deadPlayer.remainingMillis()), GOLD))
-			.append(text(" left (until " + TimeFormat.date(deadPlayer.reviveAt) + ")", MUTED));
+			.append(text(" left (until ", MUTED))
+			.append(TimeFormat.date(deadPlayer.reviveAt).withColor(MUTED))
+			.append(text(")", MUTED));
 		return withReviveButton ? entry.append(" ").append(reviveButton(deadPlayer.name)) : entry;
 	}
 
