@@ -74,10 +74,16 @@ public class TimedHardcoreConfig {
     public static class Discord {
 
         /**
-         * Discord webhook that receives a message for every timed death and revival
-         * (Discord: Server Settings → Integrations → Webhooks → Copy Webhook URL). Empty = off.
+         * Discord webhook that receives a message for every timed death
+         * (Discord: Server Settings → Integrations → Webhooks → Copy Webhook URL). Empty = no death messages.
          */
-        public String webhookUrl = "";
+        public String deathWebhookUrl = "";
+
+        /**
+         * Discord webhook for every revival. May be the same as {@link #deathWebhookUrl} (one channel for both)
+         * or another one (another channel). Empty = no revival messages.
+         */
+        public String revivalWebhookUrl = "";
 
         /**
          * false sends nothing, without losing the webhook (/timedhardcore discord disable). Deaths and revivals
@@ -98,14 +104,23 @@ public class TimedHardcoreConfig {
         /** Head of the player next to their name at the top of the messages. Same placeholders, empty = no head. */
         public String playerHead = "https://nmsr.nickac.dev/face/{player}";
 
-        /** Is a webhook set? */
+        /** Is at least one webhook set? */
         public boolean configured() {
-            return webhookUrl != null && !webhookUrl.isBlank();
+            return isSet(deathWebhookUrl) || isSet(revivalWebhookUrl);
         }
 
-        /** Are messages sent right now: webhook set and enabled? */
-        public boolean active() {
-            return configured() && enabled;
+        /** Are death messages sent right now: webhook set and enabled? */
+        public boolean postsDeaths() {
+            return enabled && isSet(deathWebhookUrl);
+        }
+
+        /** Are revival messages sent right now: webhook set and enabled? */
+        public boolean postsRevivals() {
+            return enabled && isSet(revivalWebhookUrl);
+        }
+
+        private static boolean isSet(@Nullable String url) {
+            return url != null && !url.isBlank();
         }
     }
 
@@ -219,7 +234,8 @@ public class TimedHardcoreConfig {
         if (discord == null) {
             discord = new Discord();
         }
-        validateUrl("discord.webhookUrl", discord.webhookUrl);
+        validateUrl("discord.deathWebhookUrl", discord.deathWebhookUrl);
+        validateUrl("discord.revivalWebhookUrl", discord.revivalWebhookUrl);
         if (discord.deathMedia == null) {
             throw new IllegalArgumentException("discord.deathMedia must be PICTURE or CLIP");
         }
@@ -227,12 +243,19 @@ public class TimedHardcoreConfig {
         validateUrl("discord.playerHead", withoutPlaceholders(discord.playerHead));
     }
 
-    /** Settings of older versions that moved into {@code "discord"}: old name → new name there. */
-    private static final Map<String, String> MOVED_TO_DISCORD = Map.of(
-        "discordWebhookUrl", "webhookUrl",
-        "discordPlayerImage", "playerImage",
-        "discordPlayerHead", "playerHead",
-        "discordDeathMedia", "deathMedia");
+    /**
+     * Settings of older versions that moved into {@code "discord"}: old name at the top level → new names there.
+     * The one webhook of 1.1 becomes both webhooks, so deaths and revivals still go to the same channel.
+     */
+    private static final Map<String, List<String>> MOVED_TO_DISCORD = Map.of(
+        "discordWebhookUrl", List.of("deathWebhookUrl", "revivalWebhookUrl"),
+        "discordPlayerImage", List.of("playerImage"),
+        "discordPlayerHead", List.of("playerHead"),
+        "discordDeathMedia", List.of("deathMedia"));
+
+    /** Settings renamed inside {@code "discord"} (test builds of 1.2 had a single webhookUrl there). */
+    private static final Map<String, List<String>> RENAMED_IN_DISCORD = Map.of(
+        "webhookUrl", List.of("deathWebhookUrl", "revivalWebhookUrl"));
 
     /**
      * Reads the settings from the text of the file. Files of older versions are converted: the Discord settings
@@ -246,24 +269,42 @@ public class TimedHardcoreConfig {
             return new TimedHardcoreConfig();
         }
         JsonObject object = root.getAsJsonObject();
-        for (Map.Entry<String, String> moved : MOVED_TO_DISCORD.entrySet()) {
-            JsonElement value = object.remove(moved.getKey());
-            if (value == null) {
-                continue;
-            }
-            if (!object.has("discord") || !object.get("discord").isJsonObject()) {
-                object.add("discord", new JsonObject());
-            }
-            JsonObject discord = object.getAsJsonObject("discord");
-            // A value already in the new place wins
-            if (!discord.has(moved.getValue())) {
-                discord.add(moved.getValue(), value);
-            }
-            TimedHardcore.LOGGER.info("Config: moved {} to discord.{}", moved.getKey(), moved.getValue());
+        move(object, MOVED_TO_DISCORD, false);
+        if (object.has("discord") && object.get("discord").isJsonObject()) {
+            move(object.getAsJsonObject("discord"), RENAMED_IN_DISCORD, true);
         }
         TimedHardcoreConfig config = GSON.fromJson(object, TimedHardcoreConfig.class);
         config.validate();
         return config;
+    }
+
+    /**
+     * Moves old settings out of {@code from} into the object "discord"; a value already in the new place wins.
+     *
+     * @param inDiscord whether {@code from} is the object "discord" itself (a rename there) or the top level
+     */
+    private static void move(JsonObject from, Map<String, List<String>> moves, boolean inDiscord) {
+        for (Map.Entry<String, List<String>> moved : moves.entrySet()) {
+            JsonElement value = from.remove(moved.getKey());
+            if (value == null) {
+                continue;
+            }
+            JsonObject discord = inDiscord ? from : discordObject(from);
+            for (String newName : moved.getValue()) {
+                if (!discord.has(newName)) {
+                    discord.add(newName, value);
+                }
+            }
+            TimedHardcore.LOGGER.info("Config: moved {}{} to discord.{}", inDiscord ? "discord." : "", moved.getKey(),
+                String.join(" and discord.", moved.getValue()));
+        }
+    }
+
+    private static JsonObject discordObject(JsonObject root) {
+        if (!root.has("discord") || !root.get("discord").isJsonObject()) {
+            root.add("discord", new JsonObject());
+        }
+        return root.getAsJsonObject("discord");
     }
 
     /** The settings as they are written to the file. */

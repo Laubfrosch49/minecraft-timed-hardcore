@@ -122,7 +122,8 @@ public class TimedHardcoreGameTest {
 		config.safePlayerCount = 2;
 		config.extraLivesEnabled = true;
 		config.showRemainingTimeInMotd = true;
-		config.discord.webhookUrl = "";
+		config.discord.deathWebhookUrl = "";
+		config.discord.revivalWebhookUrl = "";
 		// Saved as well, because /timedhardcore reload reads the file again
 		config.save();
 	}
@@ -506,6 +507,8 @@ public class TimedHardcoreGameTest {
 		MinecraftServer server = helper.getLevel().getServer();
 		TimedHardcoreConfig config = TimedHardcore.config();
 		BlockingQueue<Map.Entry<String, byte[]>> posts = new LinkedBlockingQueue<>();
+		// Deaths and revivals go to different webhooks (channels)
+		BlockingQueue<String> postPaths = new LinkedBlockingQueue<>();
 		Set<String> requestedPictures = ConcurrentHashMap.newKeySet();
 		AtomicInteger webhookCalls = new AtomicInteger();
 
@@ -532,6 +535,7 @@ public class TimedHardcoreGameTest {
 			if (webhookCalls.getAndIncrement() == 0) {
 				exchange.sendResponseHeaders(503, -1);
 			} else {
+				postPaths.add(exchange.getRequestURI().getPath());
 				posts.add(Map.entry(exchange.getRequestHeaders().getFirst("Content-Type"), body));
 				exchange.sendResponseHeaders(204, -1);
 			}
@@ -542,7 +546,8 @@ public class TimedHardcoreGameTest {
 		String previousImage = config.discord.playerImage;
 		String previousHead = config.discord.playerHead;
 		try {
-			config.discord.webhookUrl = base + "/webhook";
+			config.discord.deathWebhookUrl = base + "/webhook/deaths";
+			config.discord.revivalWebhookUrl = base + "/webhook/revivals";
 			config.discord.playerImage = base + "/render/{name}";
 			config.discord.playerHead = base + "/render/head/{name}";
 
@@ -568,6 +573,8 @@ public class TimedHardcoreGameTest {
 			Map.Entry<String, byte[]> death = Objects.requireNonNull(posts.poll(15, TimeUnit.SECONDS), "The death should be posted (after one retry)");
 			Map.Entry<String, byte[]> revival = Objects.requireNonNull(posts.poll(10, TimeUnit.SECONDS), "The revival should be posted");
 			Map.Entry<String, byte[]> clipDeath = Objects.requireNonNull(posts.poll(10, TimeUnit.SECONDS), "The death with clip should be posted");
+			helper.assertTrue(List.copyOf(postPaths).equals(List.of("/webhook/deaths", "/webhook/revivals", "/webhook/deaths")),
+				"Deaths and revivals go to their own webhooks: " + postPaths);
 
 			String clipBody = new String(clipDeath.getValue(), StandardCharsets.ISO_8859_1);
 			helper.assertTrue(clipBody.contains("\"image\":{\"url\":\"attachment://death.gif\"}") && clipBody.contains("Content-Type: image/gif"),
@@ -601,7 +608,8 @@ public class TimedHardcoreGameTest {
 			int colour = firstAttachedPicture(revival.getValue()).getRGB(0, 0);
 			helper.assertTrue(colour == 0xFFFF0000, "The real (red) skin in colour: " + Integer.toHexString(colour));
 		} finally {
-			config.discord.webhookUrl = "";
+			config.discord.deathWebhookUrl = "";
+			config.discord.revivalWebhookUrl = "";
 			config.discord.playerImage = previousImage;
 			config.discord.playerHead = previousHead;
 			discord.stop(0);
@@ -731,7 +739,8 @@ public class TimedHardcoreGameTest {
 			}
 			""");
 		helper.assertTrue(old.deathDuration == 30.0, "Other settings stay as they are");
-		helper.assertTrue(old.discord.webhookUrl.equals("https://discord.example/api/webhooks/1/token"), "Webhook moved: " + old.discord.webhookUrl);
+		helper.assertTrue(old.discord.deathWebhookUrl.equals("https://discord.example/api/webhooks/1/token")
+			&& old.discord.revivalWebhookUrl.equals(old.discord.deathWebhookUrl), "The one webhook becomes both: " + old.discord.revivalWebhookUrl);
 		helper.assertTrue(old.discord.playerImage.isEmpty(), "An empty picture (= no picture) stays empty");
 		helper.assertTrue(old.discord.playerHead.equals("https://render.example/head/{name}"), "Head moved: " + old.discord.playerHead);
 		helper.assertTrue(old.discord.deathMedia == TimedHardcoreConfig.DeathMedia.PICTURE && old.discord.enabled, "New settings get their defaults");
@@ -739,15 +748,31 @@ public class TimedHardcoreGameTest {
 		helper.assertTrue(saved.contains("\"discord\": {") && !saved.contains("discordWebhookUrl"), "Saved in the new form: " + saved);
 
 		TimedHardcoreConfig both = TimedHardcoreConfig.parse("""
-			{"discordWebhookUrl": "https://old.example/hook", "discord": {"webhookUrl": "https://new.example/hook"}}
+			{"discordWebhookUrl": "https://old.example/hook", "discord": {"revivalWebhookUrl": "https://new.example/hook"}}
 			""");
-		helper.assertTrue(both.discord.webhookUrl.equals("https://new.example/hook"), "A value already in the new place wins");
+		helper.assertTrue(both.discord.revivalWebhookUrl.equals("https://new.example/hook") && both.discord.deathWebhookUrl.equals("https://old.example/hook"),
+			"A value already in the new place wins");
+		TimedHardcoreConfig testBuild = TimedHardcoreConfig.parse("""
+			{"discord": {"webhookUrl": "https://test.example/hook"}}
+			""");
+		helper.assertTrue(testBuild.discord.deathWebhookUrl.equals("https://test.example/hook")
+			&& testBuild.discord.revivalWebhookUrl.equals("https://test.example/hook"), "Test builds of 1.2 had one webhookUrl in discord");
+
+		// Only deaths, only revivals
+		TimedHardcoreConfig deathsOnly = TimedHardcoreConfig.parse("""
+			{"discord": {"deathWebhookUrl": "https://deaths.example/hook"}}
+			""");
+		helper.assertTrue(deathsOnly.discord.postsDeaths() && !deathsOnly.discord.postsRevivals(), "Only deaths are posted");
 
 		// Disabled: no messages and no clips, but the webhook stays
 		old.discord.deathMedia = TimedHardcoreConfig.DeathMedia.CLIP;
-		helper.assertTrue(old.discord.active() && DeathClips.wanted(old), "Webhook set: messages and clips on");
+		helper.assertTrue(old.discord.postsDeaths() && old.discord.postsRevivals() && DeathClips.wanted(old), "Webhooks set: messages and clips on");
 		old.discord.enabled = false;
-		helper.assertTrue(!old.discord.active() && !DeathClips.wanted(old) && old.discord.configured(), "Disabled: nothing is sent");
+		helper.assertTrue(!old.discord.postsDeaths() && !old.discord.postsRevivals() && !DeathClips.wanted(old) && old.discord.configured(),
+			"Disabled: nothing is sent");
+		old.discord.enabled = true;
+		old.discord.deathWebhookUrl = "";
+		helper.assertTrue(!DeathClips.wanted(old) && old.discord.postsRevivals(), "Without a death webhook no clips are recorded");
 		helper.succeed();
 	}
 

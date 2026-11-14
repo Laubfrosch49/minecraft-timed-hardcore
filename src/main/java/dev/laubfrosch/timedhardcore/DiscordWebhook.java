@@ -30,7 +30,7 @@ import net.minecraft.server.MinecraftServer;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Posts timed deaths and revivals to a Discord channel through a webhook ({@link TimedHardcoreConfig.Discord#webhookUrl}).
+ * Posts timed deaths and revivals to a Discord channel through webhooks ({@link TimedHardcoreConfig.Discord#deathWebhookUrl}, {@link TimedHardcoreConfig.Discord#revivalWebhookUrl}).
  *
  * <p>Each message is an embed with a picture of the player ({@link TimedHardcoreConfig.Discord#playerImage}):
  * black and white on death, in colour on revival. The pictures are downloaded here and uploaded together
@@ -83,7 +83,7 @@ public final class DiscordWebhook {
 	public static void announceDeath(MinecraftServer server, GameProfile profile, Component deathMessage, long diedAt, long reviveAt,
 	                                 @Nullable CompletableFuture<byte @Nullable []> clip) {
 		TimedHardcoreConfig config = TimedHardcore.config();
-		URI webhook = webhookUri(config);
+		URI webhook = config.discord.postsDeaths() ? webhookUri(config.discord.deathWebhookUrl) : null;
 		if (webhook == null) {
 			return;
 		}
@@ -102,7 +102,7 @@ public final class DiscordWebhook {
 	 */
 	public static void announceRevival(MinecraftServer server, DeadPlayerManager.DeadPlayer deadPlayer, @Nullable String revivedBy) {
 		TimedHardcoreConfig config = TimedHardcore.config();
-		URI webhook = webhookUri(config);
+		URI webhook = config.discord.postsRevivals() ? webhookUri(config.discord.revivalWebhookUrl) : null;
 		if (webhook == null) {
 			return;
 		}
@@ -479,8 +479,7 @@ public final class DiscordWebhook {
 		}
 	}
 
-	/** The webhook to post to, or null if none is set or the messages are disabled. */
-	private static @Nullable URI webhookUri(TimedHardcoreConfig config) {
-		return config.discord.active() ? URI.create(config.discord.webhookUrl.trim()) : null;
+	private static URI webhookUri(String url) {
+		return URI.create(url.trim());
 	}
 }

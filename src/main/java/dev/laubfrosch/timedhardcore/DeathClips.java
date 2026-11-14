@@ -41,11 +41,11 @@ public final class DeathClips {
 	}
 
 	/**
-	 * Does the server want clips? Only with {@code discord.deathMedia: CLIP}, and never without a webhook or while
-	 * the messages are disabled: clips are only for Discord.
+	 * Does the server want clips? Only with {@code discord.deathMedia: CLIP}, and never without a death webhook or
+	 * while the messages are disabled: clips are only for Discord.
 	 */
 	public static boolean wanted(TimedHardcoreConfig config) {
-		return config.discord.active() && config.discord.deathMedia.isClip();
+		return config.discord.postsDeaths() && config.discord.deathMedia.isClip();
 	}
 
 	/**

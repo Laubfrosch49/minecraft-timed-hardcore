@@ -325,8 +325,8 @@ public final class TimedHardcoreCommands {
 	// --- Discord ---
 
 	/** How to set up the webhook; the URL itself is never shown, it contains the secret token of the webhook. */
-	private static final String NO_WEBHOOK = "No Discord webhook is set. Put its URL into \"webhookUrl\" under \"discord\" "
-		+ "in config/timed-hardcore.json, then run /timedhardcore reload.";
+	private static final String NO_WEBHOOK = "No Discord webhook is set. Put its URL into \"deathWebhookUrl\" and/or "
+		+ "\"revivalWebhookUrl\" under \"discord\" in config/timed-hardcore.json, then run /timedhardcore reload.";
 
 	private static String describeDiscord(TimedHardcoreConfig.Discord discord) {
 		if (!discord.configured()) {
@@ -335,7 +335,10 @@ public final class TimedHardcoreCommands {
 		if (!discord.enabled) {
 			return "Discord messages are disabled. Enable them with /timedhardcore discord enable.";
 		}
-		return "Discord messages are enabled. Deaths show " + (discord.deathMedia.isClip() ? "a death clip" : "a picture") + ".";
+		String deaths = discord.postsDeaths() ? "deaths (with " + (discord.deathMedia.isClip() ? "a death clip" : "a picture") + ")" : null;
+		String revivals = discord.postsRevivals() ? "revivals" : null;
+		String what = deaths != null && revivals != null ? deaths + " and " + revivals : deaths != null ? deaths + " only" : revivals + " only";
+		return "Discord messages are enabled: " + what + ".";
 	}
 
 	private static int showDiscord(CommandSourceStack source) {
