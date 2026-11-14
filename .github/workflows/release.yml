@@ -1,5 +1,6 @@
-# Publishes a GitHub release whenever a version tag (v1.2.3) is pushed:
-# builds the mod, runs the tests and attaches the JAR to a new release.
+# Prepares a GitHub release whenever a version tag (v1.2.3) is pushed:
+# builds the mod, runs the tests and attaches the JAR to a new draft release.
+# The draft is published by hand on GitHub, once the release notes are written.
 
 name: release
 on:
@@ -35,13 +36,15 @@ jobs:
         run: chmod +x ./gradlew
       - name: build
         run: ./gradlew build
-      - name: create release
+      - name: create draft release
         env:
           GH_TOKEN: ${{ github.token }}
-        # The release notes are generated from the commits since the previous tag and can be edited afterwards
+        # A draft is only visible to the maintainers: nobody is notified and "latest release" does not change
+        # until it is published. The generated notes (pull requests since the previous tag) are a starting point.
         run: >
           gh release create "$GITHUB_REF_NAME"
           "build/libs/timed-hardcore-$VERSION.jar"
           --title "$GITHUB_REF_NAME"
           --generate-notes
           --verify-tag
+          --draft
