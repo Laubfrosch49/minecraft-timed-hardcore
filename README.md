@@ -144,7 +144,7 @@ sequenceDiagram
     participant D as Discord
     Note over C: Keeps the last 10 seconds in memory
     S->>C: Timed death: please send your clip
-    Note over C: Records 1.5 seconds more:<br>the death screen
+    Note over C: Keeps recording for 1.5 seconds<br>to capture the death screen
     C->>S: Clip as a GIF
     S->>D: Death message with the clip
     S->>C: Kick
@@ -152,6 +152,12 @@ sequenceDiagram
 
 - **Needs the client mod.** Only the dying player's own client can record what they saw. Players without the mod get the picture.
 - **Every player decides per server**, like with server resource packs. The first time they join a server that records clips, a notice explains it and asks. The choice can be changed any time under **Edit** in the server list, or while playing in the pause menu under **World Options**:
+
+  <p align="center">
+    <img src="docs/images/clip-notice.webp" alt="Notice when joining a server with death clips, with the buttons Don't share, World only and With HUD" width="720">
+    <br>
+    <sub>The notice when joining a server that records death clips</sub>
+  </p>
 
   | Setting       | What the clips show                                                             |
   |---------------|---------------------------------------------------------------------------------|
@@ -162,8 +168,8 @@ sequenceDiagram
 
   <table>
     <tr>
-      <td align="center"><img src="docs/images/clip-world-only.webp" alt="Frame of a death clip with World only: just the game world" width="380"></td>
-      <td align="center"><img src="docs/images/clip-with-hud.webp" alt="Frame of a death clip with HUD: hotbar, hearts and boss bar are visible" width="380"></td>
+      <td align="center"><img src="docs/images/death.gif" alt="Death clip with World only: a zombie attacks in a cave, the clip ends on the death screen" width="400"></td>
+      <td align="center"><img src="docs/images/death_hud.gif" alt="Death clip with HUD: fighting the Ender Dragon with hotbar and boss bar visible, the clip ends on the death screen" width="400"></td>
     </tr>
     <tr>
       <td align="center"><sub>World only</sub></td>
@@ -199,6 +205,7 @@ Put the same JAR and Fabric API into the `mods` folder of your client. That adds
 | Green apple      | A glinting red apple with a green name | Its own green texture, also in the totem animation               |
 | Wandering Healer | Looks like a normal wandering trader   | Its own robe with a green cross                                  |
 | Server list      | Normal MOTD                            | Shows how long you are still dead, or that you were revived      |
+| Times            | In the server's time zone, e.g. `UTC`  | In your own time zone                                            |
 | Death clips      | Your death shows the picture           | You can share a clip of your last seconds, if the server asks    |
 
 > [!TIP]
@@ -279,9 +286,6 @@ The [Discord](#discord) settings are grouped under `discord`:
 | `playerImage`       | NMSR full body | Picture of the player. `{player}` is the UUID in online mode, the name otherwise. Empty = no picture  |
 | `playerHead`        | NMSR face      | Head next to the player's name at the top of the message. Same placeholders. Empty = no head          |
 
-> [!NOTE]
-> **Updating from 1.1:** the Discord settings used to be at the top level (`discordWebhookUrl`, `discordPlayerImage`, `discordPlayerHead`). They are moved into `discord` automatically on the first start. The one webhook becomes both `deathWebhookUrl` and `revivalWebhookUrl`, so everything keeps going to the same channel.
-
 ### Client
 
 Each player's own settings live in `config/timed-hardcore-client.json` on their computer. No server can change them.
@@ -338,9 +342,11 @@ Yes. The revival is a fixed point in real time, not a countdown.
 </details>
 
 <details>
-<summary><b>Which time zone do the fixed revival times use?</b></summary>
+<summary><b>Which time zone do the times use?</b></summary>
 
-The time zone of the server. Many hosts run on UTC, so `00:00` may not be midnight for your players.
+The fixed revival times in the config are in the time zone of the server. Many hosts run on UTC, so `00:00` may not be midnight for your players.
+
+In the game, players with the client mod see every time (revival, time of death, the fixed revival times) in their own time zone: on the kick screen, in chat and in the graveyard. Without the mod, the times are shown in the server's time zone with its name, for example `8:00 PM UTC`.
 </details>
 
 <details>
