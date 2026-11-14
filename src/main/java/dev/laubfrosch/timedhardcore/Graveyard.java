@@ -237,8 +237,12 @@ public final class Graveyard {
 
 	/** A line with a colored value in the middle: gray text before it, the value, gray text after it. */
 	private static Component line(String before, String value, int valueColor, String after) {
+		return line(before, Component.literal(value), valueColor, after);
+	}
+
+	private static Component line(String before, MutableComponent value, int valueColor, String after) {
 		return Component.literal(before).withColor(MUTED)
-			.append(Component.literal(value).withColor(valueColor))
+			.append(value.withColor(valueColor))
 			.append(Component.literal(after).withColor(MUTED));
 	}
 

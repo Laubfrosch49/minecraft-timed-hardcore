@@ -5,9 +5,12 @@
 	"client": [
 		"ClientPacketListenerDeathScreenMixin",
 		"ClientCommonPacketListenerImplAccessor",
+		"ClientCommonPacketListenerImplLocalTimesMixin",
+		"ClientHandshakePacketListenerImplLocalTimesMixin",
 		"ClientPacketListenerMixin",
 		"ClientPacketListenerRespawnMixin",
 		"DeathScreenMixin",
+		"DisplayInfoLocalTimesMixin",
 		"GameRendererMixin",
 		"GuiDeathScreenMixin",
 		"HeartTypeMixin",

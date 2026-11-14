@@ -17,6 +17,7 @@ import dev.laubfrosch.timedhardcore.Risk;
 import dev.laubfrosch.timedhardcore.RiskNotifier;
 import dev.laubfrosch.timedhardcore.ServerListMotd;
 import dev.laubfrosch.timedhardcore.TimedHardcore;
+import dev.laubfrosch.timedhardcore.TimeFormat;
 import dev.laubfrosch.timedhardcore.TimedHardcoreConfig;
 import dev.laubfrosch.timedhardcore.TimedHardcoreGameRules;
 import com.sun.net.httpserver.HttpServer;
@@ -40,6 +41,8 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -287,7 +290,10 @@ public class TimedHardcoreGameTest {
 		run(server, "timedhardcore times 20, 0:00 20:00");
 		helper.assertTrue(config.reviveMode == TimedHardcoreConfig.ReviveMode.FIXED_TIMES, "times should switch to the fixed times mode");
 		helper.assertTrue(config.reviveTimes.equals(List.of("00:00", "20:00")), "Times sorted and without duplicates: " + config.reviveTimes);
-		helper.assertTrue(config.describe().equals("daily at 00:00, 20:00"), "Description: " + config.describe());
+		String fixedTimes = config.describe().getString();
+		// The server names its time zone after the last time, e.g. "daily at 00:00, 20:00 UTC"
+		helper.assertTrue(fixedTimes.startsWith("daily at 00:00, 20:00 ") && fixedTimes.length() > "daily at 00:00, 20:00 ".length(),
+			"Description with the server's time zone: " + fixedTimes);
 
 		run(server, "timedhardcore times 25:00");
 		helper.assertTrue(config.reviveTimes.equals(List.of("00:00", "20:00")), "An invalid time must not change anything");
@@ -297,7 +303,7 @@ public class TimedHardcoreGameTest {
 
 		run(server, "timedhardcore duration 1440");
 		helper.assertTrue(config.reviveMode == TimedHardcoreConfig.ReviveMode.DURATION && config.deathDuration == ONE_DAY_IN_MINUTES, "duration should set the minutes");
-		helper.assertTrue(config.describe().equals("1 day after death"), "Description: " + config.describe());
+		helper.assertTrue(config.describe().getString().equals("1 day after death"), "Description: " + config.describe().getString());
 	}
 
 	/** Changing the settings recalculates all revivals from the time of death (shorter: revived at once, longer: extended). */
@@ -773,6 +779,30 @@ public class TimedHardcoreGameTest {
 		old.discord.enabled = true;
 		old.discord.deathWebhookUrl = "";
 		helper.assertTrue(!DeathClips.wanted(old) && old.discord.postsRevivals(), "Without a death webhook no clips are recorded");
+		helper.succeed();
+	}
+
+	/**
+	 * Points in time are written in the server's time zone with its name, and carry the exact moment,
+	 * so the client mod can show them in the player's own time zone.
+	 */
+	@GameTest
+	public void localTimes(GameTestHelper helper) {
+		long moment = ZonedDateTime.of(2026, 9, 28, 18, 0, 0, 0, ZoneOffset.UTC).toInstant().toEpochMilli();
+		ZoneId server = ZoneId.systemDefault();
+		Component date = TimeFormat.date(moment);
+		helper.assertTrue(date.getString().startsWith(TimeFormat.date(moment, server) + " "), "Server time with the zone: " + date.getString());
+
+		// Berlin is UTC+2 in September, New York UTC-4
+		ZoneId berlin = ZoneId.of("Europe/Berlin");
+		String local = TimeFormat.localize(date.getStyle().getInsertion(), berlin);
+		helper.assertTrue("28 Sep 2026 at 8:00 PM".equals(local), "Date in the player's zone, without its name: " + local);
+		Component clock = TimeFormat.clock(moment, true);
+		String localClock = TimeFormat.localize(clock.getStyle().getInsertion(), ZoneId.of("America/New_York"));
+		helper.assertTrue("14:00".equals(localClock), "Time of day in the player's zone: " + localClock);
+
+		helper.assertTrue(TimeFormat.localize(null, berlin) == null && TimeFormat.localize("something else", berlin) == null,
+			"Other text stays as it is");
 		helper.succeed();
 	}
 

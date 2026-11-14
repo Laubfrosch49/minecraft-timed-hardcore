@@ -5,6 +5,7 @@ import dev.laubfrosch.timedhardcore.network.TimedHardcoreNetwork;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import org.jspecify.annotations.Nullable;
 
@@ -26,6 +27,8 @@ public class TimedHardcoreClient implements ClientModInitializer {
 			(_, _) -> appleActivationPending = true);
 
 		ClientSettings.load();
+		// Times of revival and death in chat (e.g. /timedhardcore info) in the player's own time zone
+		ClientReceiveMessageEvents.MODIFY_GAME.register((message, _) -> LocalTimes.localize(message));
 		ClipNotice.register();
 		ClientPlayNetworking.registerGlobalReceiver(TimedHardcoreNetwork.ClipSettingsPayload.TYPE,
 			(payload, _) -> DeathClipRecorder.setRequestedByServer(payload.clips()));

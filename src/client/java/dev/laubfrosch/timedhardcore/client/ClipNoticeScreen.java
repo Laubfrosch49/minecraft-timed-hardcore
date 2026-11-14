@@ -21,8 +21,8 @@ public class ClipNoticeScreen extends Screen {
 
 	private static final Identifier INFO_ICON = Identifier.withDefaultNamespace("icon/info");
 	private static final Component MESSAGE = Component.literal("If you die and stay dead, the last 10 seconds before your death "
-		+ "are sent to this server and posted in its Discord. Besides the game world, this server also records your HUD, "
-		+ "inventory and chat. You can also share only the game world.\n\n"
+		+ "are sent to this server and posted in its Discord. Besides the game world, your HUD, inventory and chat "
+		+ "may also be recorded.\n\n"
 		+ "You can change this any time under \"Edit\" in the server list.");
 
 	private final Consumer<ClipConsent> onChoice;

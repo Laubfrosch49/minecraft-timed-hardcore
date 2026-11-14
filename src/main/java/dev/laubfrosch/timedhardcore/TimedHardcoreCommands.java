@@ -23,6 +23,7 @@ import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.commands.arguments.GameProfileArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.NameAndId;
 import net.minecraft.util.Prediction;
@@ -105,7 +106,7 @@ public final class TimedHardcoreCommands {
 			.executes(ctx -> revive(ctx.getSource(), StringArgumentType.getString(ctx, "player")));
 	}
 
-	private static Component success(String text) {
+	private static MutableComponent success(String text) {
 		return Component.literal(text).withStyle(ChatFormatting.GREEN);
 	}
 
@@ -219,8 +220,9 @@ public final class TimedHardcoreCommands {
 			: TimedHardcore.recalculateRevivals(source.getServer());
 		TimedHardcore.announceRevivals(source.getServer());
 		int dead = manager.stillDead().size();
-		source.sendSuccess(() -> success("Timed Hardcore reloaded: " + plural(dead, "dead player", "dead players")
-			+ ", revival " + TimedHardcore.config().describe() + "." + recalculatedNote(recalculated)), true);
+		source.sendSuccess(() -> success("Timed Hardcore reloaded: " + plural(dead, "dead player", "dead players") + ", revival ")
+			.append(TimedHardcore.config().describe())
+			.append("." + recalculatedNote(recalculated)), true);
 		return 1;
 	}
 
@@ -248,7 +250,7 @@ public final class TimedHardcoreCommands {
 	// --- Revival settings ---
 
 	private static int showRevival(CommandSourceStack source) {
-		source.sendSuccess(() -> Component.literal("Revival: " + TimedHardcore.config().describe()), false);
+		source.sendSuccess(() -> Component.literal("Revival: ").append(TimedHardcore.config().describe()), false);
 		return 1;
 	}
 
@@ -297,7 +299,7 @@ public final class TimedHardcoreCommands {
 	private static int saveRevival(CommandSourceStack source, TimedHardcoreConfig config) {
 		config.save();
 		int recalculated = TimedHardcore.recalculateRevivals(source.getServer());
-		source.sendSuccess(() -> success("Revival is now " + config.describe() + "." + recalculatedNote(recalculated)), true);
+		source.sendSuccess(() -> success("Revival is now ").append(config.describe()).append("." + recalculatedNote(recalculated)), true);
 		return 1;
 	}
 

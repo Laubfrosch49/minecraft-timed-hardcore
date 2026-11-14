@@ -6,6 +6,8 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 
 import java.io.IOException;
 import java.net.URI;
@@ -197,11 +199,26 @@ public class TimedHardcoreConfig {
         return time.format(DateTimeFormatter.ofPattern("HH:mm"));
     }
 
-    /** Short description for commands, e.g. "1 day after death" or "daily at 00:00, 12:00". */
-    public String describe() {
+    /**
+     * Short description for players and commands, e.g. "1 day after death" or "daily at 00:00, 12:00 UTC".
+     * The times are marked, so the client mod shows them in the player's own time zone ({@link TimeFormat#clock}).
+     */
+    public MutableComponent describe() {
         return switch (reviveMode) {
-            case DURATION -> TimeFormat.duration(Math.round(deathDuration * 60 * 1000)) + " after death";
-            case FIXED_TIMES -> "daily at " + String.join(", ", parsedReviveTimes().stream().map(TimedHardcoreConfig::formatTime).toList());
+            case DURATION -> Component.literal(TimeFormat.duration(Math.round(deathDuration * 60 * 1000)) + " after death");
+            case FIXED_TIMES -> {
+                ZoneId zone = ZoneId.systemDefault();
+                LocalDate today = LocalDate.now(zone);
+                List<LocalTime> times = parsedReviveTimes();
+                MutableComponent text = Component.literal("daily at ");
+                for (int i = 0; i < times.size(); i++) {
+                    long moment = ZonedDateTime.of(today, times.get(i), zone).toInstant().toEpochMilli();
+                    // The zone is named once, after the last time
+                    text.append(i == 0 ? Component.empty() : Component.literal(", "))
+                        .append(TimeFormat.clock(moment, i == times.size() - 1));
+                }
+                yield text;
+            }
         };
     }
 
